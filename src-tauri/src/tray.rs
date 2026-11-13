@@ -1,7 +1,5 @@
-use crate::apps;
-use crate::{open_app, toggle_window, LAST_WINDOW};
-use ksni::Tray;
-use tauri::AppHandle;
+use crate::{open_app_tab, apps};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
@@ -16,11 +14,6 @@ impl TrayIcon {
         } else {
             autostart.enable().ok();
         }
-    }
-
-    fn activate_last(&mut self) {
-        let id = LAST_WINDOW.lock().unwrap().clone();
-        toggle_window(&self.0, id.as_deref().unwrap_or("gmail"));
     }
 }
 
@@ -43,7 +36,6 @@ impl ksni::Tray for TrayIcon {
         vec![ksni::Icon { width: w, height: h, data: argb }]
     }
     // triggers a menu re-eval every time the user opens it
-    // (keeps the autostart checkbox honest)
     fn menu_about_to_show(&mut self) {}
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::*;
@@ -52,7 +44,9 @@ impl ksni::Tray for TrayIcon {
             .map(|a| {
                 StandardItem {
                     label: a.title.into(),
-                    activate: Box::new(move |t: &mut Self| open_app(&t.0, a)),
+                    activate: Box::new(move |t: &mut Self| {
+                        let _ = open_app_tab(&t.0, a);
+                    }),
                     ..Default::default()
                 }
                 .into()
@@ -80,12 +74,22 @@ impl ksni::Tray for TrayIcon {
         );
         items
     }
-    // left click on Plasma = activate: toggle last-used window
+    // left click on Plasma = activate: toggle the hub window
     fn activate(&mut self, _x: i32, _y: i32) {
-        self.activate_last();
+        if let Some(w) = self.0.get_webview_window("hub") {
+            if w.is_visible().unwrap_or(false) {
+                w.hide().ok();
+            } else {
+                w.show().ok();
+                w.set_focus().ok();
+            }
+        }
     }
     fn secondary_activate(&mut self, _x: i32, _y: i32) {
-        self.activate_last();
+        if let Some(w) = self.0.get_webview_window("hub") {
+            w.show().ok();
+            w.set_focus().ok();
+        }
     }
 }
 
