@@ -99,7 +99,7 @@ button:hover { color: var(--fg); background: #35363a; }
   min-width: 150px;
 }
 
-.popup.hidden, .hidden { display: none; }
+.popup.hidden, .hidden { display: none !important; }
 
 .app-item, .ctx-item {
   display: flex;

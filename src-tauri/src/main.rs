@@ -13,6 +13,18 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const STRIP: f64 = 36.0;
 
+// window client size in logical px. On Wayland inner_size() returns 0 until
+// the compositor sends the first configure — fall back to builder dims then.
+fn client_logical(window: &tauri::Window) -> (f64, f64) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let inner = window.inner_size().unwrap_or(PhysicalSize::new(0, 0));
+    if inner.width == 0 || inner.height == 0 {
+        (1280.0, 860.0)
+    } else {
+        (inner.width as f64 / scale, inner.height as f64 / scale)
+    }
+}
+
 // snap terminals export sandbox env (GIO_MODULE_DIR, GST_*) into their host
 // shell; webkit then loads no TLS/GStreamer elements. Drop vars pointing at a
 // snap sandbox unless they actually contain what the system needs.
@@ -79,10 +91,7 @@ fn create_webview(
     let Some(window) = app.get_window("hub") else {
         return Err("no hub window".into());
     };
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let inner = window.inner_size().unwrap_or(PhysicalSize::new(1280, 860));
-    let w = inner.width as f64 / scale;
-    let h = inner.height as f64 / scale;
+    let (w, h) = client_logical(&window);
 
     let a1 = app.clone();
     let a2 = app.clone();
@@ -173,8 +182,8 @@ fn activate_tab_impl(app: &AppHandle, id: u64) -> Result<(), String> {
     let Some(window) = app.get_window("hub") else {
         return Err("no hub window".into());
     };
+    let (w, h) = client_logical(&window);
     let scale = window.scale_factor().unwrap_or(1.0);
-    let inner = window.inner_size().unwrap_or(PhysicalSize::new(1280, 860));
     let strip_h = (STRIP * scale) as u32;
     {
         let st = app.state::<TabsState>();
@@ -185,7 +194,11 @@ fn activate_tab_impl(app: &AppHandle, id: u64) -> Result<(), String> {
             Some(tid) if tid == id => {
                 let _ = wv.set_bounds(Rect {
                     position: PhysicalPosition::new(0, strip_h as i32).into(),
-                    size: PhysicalSize::new(inner.width, inner.height.saturating_sub(strip_h)).into(),
+                    size: PhysicalSize::new(
+                        (w * scale) as u32,
+                        ((h - STRIP) * scale) as u32,
+                    )
+                    .into(),
                 });
                 wv.show().ok();
             }
@@ -207,8 +220,8 @@ fn i_active(st: &tauri::State<TabsState>, id: u64) {
 // layout: strip on top, active tab fills the rest — on every window resize
 fn relayout(app: &AppHandle) {
     let Some(window) = app.get_window("hub") else { return };
+    let (w, h) = client_logical(&window);
     let scale = window.scale_factor().unwrap_or(1.0);
-    let Ok(inner) = window.inner_size() else { return };
     let strip_h = (STRIP * scale) as u32;
     let active = {
         let st = app.state::<TabsState>();
@@ -216,15 +229,19 @@ fn relayout(app: &AppHandle) {
         guard.active
     };
     for wv in window.webviews() {
-        if wv.label() == "chrome" {
+        if wv.label() == "tabbar" {
             let _ = wv.set_bounds(Rect {
                 position: PhysicalPosition::new(0, 0).into(),
-                size: PhysicalSize::new(inner.width, strip_h).into(),
+                size: PhysicalSize::new((w * scale) as u32, strip_h).into(),
             });
         } else if state::label_id(wv.label()) == Some(active) {
             let _ = wv.set_bounds(Rect {
                 position: PhysicalPosition::new(0, strip_h as i32).into(),
-                size: PhysicalSize::new(inner.width, inner.height.saturating_sub(strip_h)).into(),
+                size: PhysicalSize::new(
+                    (w * scale) as u32,
+                    ((h - STRIP) * scale) as u32,
+                )
+                .into(),
             });
         }
     }
@@ -485,7 +502,7 @@ fn main() {
             let inner = window.inner_size()?;
             let w = inner.width as f64 / scale;
             window.add_child(
-                WebviewBuilder::new("chrome", WebviewUrl::App("index.html".into())),
+                WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(w, STRIP),
             )?;
@@ -528,6 +545,16 @@ fn main() {
             }
 
             tray::spawn(handle.clone()).map_err(|e| e.to_string())?;
+
+            // Wayland: inner_size() is 0 until the compositor maps the window;
+            // re-layout once the real size has arrived
+            let rl = handle.clone();
+            std::thread::spawn(move || {
+                for ms in [150u64, 500, 1200] {
+                    std::thread::sleep(std::time::Duration::from_millis(ms));
+                    relayout(&rl);
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -536,7 +563,7 @@ fn main() {
                 api.prevent_close();
                 window.hide().ok();
             }
-            WindowEvent::Resized(_) => relayout(window.app_handle()),
+            WindowEvent::Resized(_) | WindowEvent::Focused(_) => relayout(window.app_handle()),
             _ => {}
         })
         .run(tauri::generate_context!())
