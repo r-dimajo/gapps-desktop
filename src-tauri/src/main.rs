@@ -65,6 +65,8 @@ fn nav_policy(app: &AppHandle, id: u64, url: &tauri::Url) -> bool {
     state::save(app);
     state::emit(app);
     match url.scheme() {
+        // only these ever leave the shell; anything else (about:blank,
+        // blob:, javascript:...) is denied silently
         "http" | "https" => {
             if apps::is_internal(url.host_str().unwrap_or("")) {
                 true
@@ -73,10 +75,11 @@ fn nav_policy(app: &AppHandle, id: u64, url: &tauri::Url) -> bool {
                 false
             }
         }
-        _ => {
+        "mailto" | "webcal" => {
             open_external(url);
             false
         }
+        _ => false,
     }
 }
 
@@ -113,7 +116,8 @@ fn create_webview(
             }
         })
         .on_new_window(move |url, _| {
-            // target=_blank: internal → new tab, external → system browser
+            // target=_blank: internal → new tab, external → system browser,
+            // about:blank etc. → denied silently (no empty browser tabs)
             let internal =
                 matches!(url.scheme(), "http" | "https") && apps::is_internal(url.host_str().unwrap_or(""));
             if internal {
@@ -125,7 +129,7 @@ fn create_webview(
                         .unwrap_or("custom");
                     let _ = add_tab(&a, u, app_id, true);
                 });
-            } else {
+            } else if matches!(url.scheme(), "http" | "https" | "mailto" | "webcal") {
                 open_external(&url);
             }
             NewWindowResponse::Deny
@@ -215,6 +219,75 @@ fn activate_tab_impl(app: &AppHandle, id: u64) -> Result<(), String> {
 
 fn i_active(st: &tauri::State<TabsState>, id: u64) {
     st.0.lock().unwrap().active = id;
+}
+
+// Wayland: webviews created before the compositor maps the window render
+// blank. Boot every webview on the first Resized with a real size instead.
+static BOOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PENDING_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+fn boot_webviews(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+    if BOOTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(window) = app.get_window("hub") else { return };
+    let (w, _) = client_logical(&window);
+    if window
+        .add_child(
+            WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(w, STRIP),
+        )
+        .is_err()
+    {
+        eprintln!("tabbar failed");
+        return;
+    }
+
+    let (tabs, active) = {
+        let st = app.state::<TabsState>();
+        let guard = st.0.lock().unwrap();
+        (
+            guard
+                .tabs
+                .iter()
+                .map(|t| (t.id, t.url.clone(), t.app.clone()))
+                .collect::<Vec<_>>(),
+            guard.active,
+        )
+    };
+    if tabs.is_empty() {
+        let _ = add_tab(
+            app,
+            apps::by_id("gmail").unwrap().url.parse().unwrap(),
+            "gmail",
+            true,
+        );
+    } else {
+        for (id, url, app_id) in &tabs {
+            let parsed: tauri::Url = url.parse().unwrap_or_else(|_| {
+                apps::by_id("gmail").unwrap().url.parse().unwrap()
+            });
+            let _ = create_webview(
+                app,
+                *id,
+                parsed,
+                apps::by_id(app_id).map(|d| d.id).unwrap_or("custom"),
+                true,
+            );
+        }
+        if active != 0 {
+            let _ = activate_tab_impl(app, active);
+        }
+    }
+
+    if let Some(args) = PENDING_ARGS.get() {
+        for a in args {
+            launch_arg(app, a);
+        }
+    }
+    relayout(app);
 }
 
 // layout: strip on top, active tab fills the rest — on every window resize
@@ -492,69 +565,21 @@ fn main() {
                 .unwrap()
                 .settings
                 .start_minimized;
-            let window = tauri::WindowBuilder::new(&handle, "hub")
+            tauri::WindowBuilder::new(&handle, "hub")
                 .title("gapps")
                 .inner_size(1280.0, 860.0)
                 .visible(!start_min)
                 .build()?;
 
-            let scale = window.scale_factor().unwrap_or(1.0);
-            let inner = window.inner_size()?;
-            let w = inner.width as f64 / scale;
-            window.add_child(
-                WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
-                LogicalPosition::new(0.0, 0.0),
-                LogicalSize::new(w, STRIP),
-            )?;
-
-            // restore saved tab layout (webviews hidden; active one shown after)
-            let (tabs, active) = {
-                let st = handle.state::<TabsState>();
-                let i = st.0.lock().unwrap();
-                (
-                    i.tabs
-                        .iter()
-                        .map(|t| (t.id, t.url.clone(), t.app.clone()))
-                        .collect::<Vec<_>>(),
-                    i.active,
-                )
-            };
-            if tabs.is_empty() {
-                add_tab(&handle, "https://mail.google.com".parse().unwrap(), "gmail", true)?;
-            } else {
-                for (id, url, app_id) in &tabs {
-                    let parsed: tauri::Url = url.parse().unwrap_or_else(|_| {
-                        apps::by_id("gmail").unwrap().url.parse().unwrap()
-                    });
-                    create_webview(
-                        &handle,
-                        *id,
-                        parsed,
-                        apps::by_id(app_id).map(|d| d.id).unwrap_or("custom"),
-                        true,
-                    )?;
-                }
-                if active != 0 {
-                    activate_tab_impl(&handle, active)?;
-                }
-            }
-
-            // first-launch args (mailto/webcal/url) become tabs
-            if let Some(arg) = args.iter().find(|a| !a.starts_with('-')) {
-                launch_arg(&handle, arg);
-            }
+            // webviews are created later, on the first real window size
+            let _ = PENDING_ARGS.set(
+                args.iter()
+                    .filter(|a| !a.starts_with('-'))
+                    .cloned()
+                    .collect(),
+            );
 
             tray::spawn(handle.clone()).map_err(|e| e.to_string())?;
-
-            // Wayland: inner_size() is 0 until the compositor maps the window;
-            // re-layout once the real size has arrived
-            let rl = handle.clone();
-            std::thread::spawn(move || {
-                for ms in [150u64, 500, 1200] {
-                    std::thread::sleep(std::time::Duration::from_millis(ms));
-                    relayout(&rl);
-                }
-            });
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -563,7 +588,17 @@ fn main() {
                 api.prevent_close();
                 window.hide().ok();
             }
-            WindowEvent::Resized(_) | WindowEvent::Focused(_) => relayout(window.app_handle()),
+            WindowEvent::Resized(size) => {
+                if !BOOTED.load(std::sync::atomic::Ordering::SeqCst)
+                    && size.width > 0
+                    && size.height > 0
+                {
+                    boot_webviews(window.app_handle());
+                } else {
+                    relayout(window.app_handle());
+                }
+            }
+            WindowEvent::Focused(_) => relayout(window.app_handle()),
             _ => {}
         })
         .run(tauri::generate_context!())
