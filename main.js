@@ -926,11 +926,23 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Google Suite');
 
-  // Submenu with all 11 apps
-  const allAppsSubmenu = APPS.map((app) => ({
-    label: `${app.title} — ${app.description}`,
-    click: () => showAndSwitchTo(app.id)
-  }));
+  // Nested submenu with all 11 apps
+  const allAppsSubmenu = APPS.map((app) => {
+    const iconPath = getAppIconPath(app.id);
+    let itemIcon = null;
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (!img.isEmpty()) {
+        itemIcon = img.resize({ width: 16, height: 16 });
+      }
+    } catch (_) {}
+
+    return {
+      label: `${app.title} — ${app.description}`,
+      icon: itemIcon || undefined,
+      click: () => showAndSwitchTo(app.id)
+    };
+  });
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -947,14 +959,9 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Tutte le Applicazioni',
+      label: 'Applicazioni Google',
       submenu: allAppsSubmenu
     },
-    { type: 'separator' },
-    ...APPS.map((app) => ({
-      label: app.title,
-      click: () => showAndSwitchTo(app.id)
-    })),
     { type: 'separator' },
     {
       label: 'Esci',
