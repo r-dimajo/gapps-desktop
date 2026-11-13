@@ -4,3 +4,5 @@ target/
 src-tauri/target/
 dist/.DS_Store
 icons/apps/
+__pycache__/
+*.pyc

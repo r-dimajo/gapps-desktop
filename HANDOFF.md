@@ -67,7 +67,7 @@ google-suite-linux/
 ### 6. System Tray Parity
 - KDE StatusNotifierItem tray icon (`icons/icon.png`).
 - Left-click tray icon toggles window visibility.
-- Right-click tray menu provides direct jumps to all 10 apps, plus quick "Nuova scheda..." action.
+- Right-click tray menu provides direct jumps to all 11 apps, plus quick "Nuova scheda..." action.
 - Close-to-tray: Closing the window hides it to tray rather than exiting.
 
 ### 7. Link Policy & Global Shortcuts
