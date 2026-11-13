@@ -1,0 +1,12 @@
+{
+  "name": "gapps",
+  "version": "1.0.0",
+  "description": "Google Suite desktop shell for Linux",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.1"
+  }
+}

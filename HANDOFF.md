@@ -1,79 +1,90 @@
-# gapps — handoff & project documentation
+# gapps — Google Suite Desktop Shell for Linux
 
-Google Suite desktop shell for Linux. Rust + Tauri 2 (WebKitGTK engine, **no Chromium**).
+Google Suite desktop shell for Linux built with **Electron** (Chromium engine).
 Target: Kubuntu 26.04, KDE Plasma 6.6 Wayland, NVIDIA GPU (10de:2d18), mixed-DPI monitors.
-User speaks Italian. Avoid the word "chrome" in UI-facing strings (use "tabbar" or "strip").
+Language: Italian (User-facing UI).
 
-## Repo layout
+---
+
+## Why Electron over Rust/WebKitGTK
+
+The initial prototype attempted Rust + Tauri 2 (WebKitGTK). WebKitGTK on Linux Wayland with NVIDIA drivers resulted in insurmountable issues:
+1. **DMA-BUF & Blank Pages**: WebKitGTK's hardware acceleration frequently broke on NVIDIA Wayland drivers, rendering blank white screens.
+2. **Google Suite Compatibility**: Google actively degrades WebKitGTK (blocking Google Meet screen sharing via PipeWire, failing Google Docs offline, warning of "insecure browser" on login).
+3. **Multi-webview Layout**: Tauri on Linux packs webviews inside GTK3 `GtkBox`, where dynamic tab sizing and multi-instance lifecycle caused layout fighting.
+
+**Electron (Chromium)** natively supports:
+- Full Google Workspace functionality (Meet screen share, Docs, Sheets, Drive, Gmail).
+- Seamless Wayland and XWayland integration via Chromium Ozone (`ozone-platform-hint=auto`).
+- Native `WebContentsView` tab strip architecture without DOM overhead.
+- Instant, stable startup with hardware acceleration.
+
+---
+
+## Repository Layout
 
 ```
 google-suite-linux/
-├── HANDOFF.md            ← this file
-├── dist/                 tab strip UI (plain HTML/JS/CSS, no framework, loaded via WebviewUrl::App)
-│   ├── index.html        strip: tabs + '+' button + reload + settings
-│   ├── app.js            IPC to Rust commands, renders tabs from "tabs" events, native menu triggers
-│   └── style.css         exact 36px height strip, dark Google Suite styling
-└── src-tauri/
-    ├── Cargo.toml        tauri 2 (unstable, devtools), gtk 0.18 (linux), ksni 0.3 (blocking), serde, image
-    ├── tauri.conf.json   withGlobalTauri: true, frontendDist ../dist, windows: [] (hub built in code)
-    ├── capabilities/default.json   "tabbar" webview, core:default + start-dragging
-    ├── icons/icon.png    128px icon (also installed to ~/.local/share/icons/hicolor/128x128/apps/gapps.png)
-    └── src/
-        ├── main.rs       GTK layout, commands, boot, nav policy, launch_arg (mailto/webcal/URL routing), native menus
-        ├── apps.rs       APPS registry (10 apps: gmail, calendar, drive, docs, sheets, slides, meet, chat, keep, tasks) + is_internal()
-        ├── state.rs      TabsState (tabs/active/settings), state.json/settings.json in app data dir (~/.local/share/com.dimric.gapps)
-        └── tray.rs       ksni StatusNotifierItem tray (left-click toggle hub, right-click menu, pixmap icon)
+├── HANDOFF.md              ← Project documentation
+├── package.json            ← Node/Electron dependencies & scripts
+├── apps.js                 ← Google Suite registry (10 apps) & URL routing helpers
+├── main.js                 ← Electron main process: views, menus, tray, IPC, persistence
+├── preload.js              ← Context bridge exposing safe gapps API to tab strip
+├── tabbar/                 ← Sleek 36px top tab strip UI
+│   ├── index.html          ← Tab strip markup: tabs, '+' button, reload, settings
+│   ├── style.css           ← Dark Google Suite aesthetic (36px fixed height)
+│   └── renderer.js         ← Tab events, shortcuts, middle-click close, context menu
+├── icons/
+│   └── icon.png            ← 128px application & tray icon
+└── src-tauri/              ← Legacy Rust prototype (preserved for reference)
 ```
 
-Build/run: `cargo build` then `./target/debug/gapps` in `src-tauri/`.
-Kill: `pkill -x gapps` (never `pkill -f gapps` — it kills your own shell).
+---
 
-## Architectural Architecture & Fixes
+## Features & Architecture
 
-### 1. The Core Layout Fix (GTK Box Packing)
-- **Problem**: Tauri's `add_child` packs child webviews into `window.default_vbox()` with `expand = true, fill = true`. `set_bounds()` is an intentional no-op in `wry` when the parent container is a `GtkBox`. Consequently, GTK divided window height equally across visible webviews (tabbar got 50%, active tab got 50%), causing giant bars and white slices.
-- **Solution**:
-  - We configure GTK box packing on the main thread via `apply_gtk_layout(window)`:
-    - `tabbar` child: `vbox.set_child_packing(tabbar, false, false, 0, gtk::PackType::Start)` and `tabbar.set_size_request(-1, 36)`.
-    - Content webviews: `vbox.set_child_packing(content, true, true, 0, gtk::PackType::Start)`.
-  - GTK's native layout engine now automatically allocates exactly 36 logical pixels to the tabbar, and 100% of the remaining height (`window_height - 36`) to the active tab webview.
-  - Inactive tabs are hidden (`wv.hide()`), which completely removes them from GTK box allocation.
-  - Resizing the window is handled natively by GTK without any manual pixel bounds math.
+### 1. Multi-Tab Architecture (`WebContentsView`)
+- Top 36px is an isolated `WebContentsView` loading `tabbar/index.html`.
+- Active Google app runs in a dedicated `WebContentsView` taking `y: 36, height: window_height - 36`.
+- **Lazy loading**: At boot, only the active tab creates a WebContents. Other tabs load on-demand when clicked.
+- Inactive tabs remain cached in memory for zero-latency switching without reloading pages or losing unsaved edits.
 
-### 2. Native Menus (No Clipping, Perfect KDE Plasma Integration)
-- **Problem**: Popups (the '+' app menu, right-click context menu, and settings panel) were previously HTML `<div>` elements inside `index.html`. Since the tabbar webview is strictly 36px tall, any dropdown menu rendered at `top: 40px` was clipped and invisible outside the 36px webview rect.
-- **Solution**:
-  - Replaced HTML popups with Tauri 2 native desktop menus via `MenuBuilder`, `MenuItemBuilder`, `CheckMenuItemBuilder`, and `menu.popup(window)`.
-  - Triggered via IPC commands:
-    - Click `+`: `show_app_menu` -> native menu listing all 10 Google Suite apps.
-    - Right-click tab: `show_tab_menu` -> native menu with "Open in browser", "Reload", "Close tab".
-    - Click gear ⚙: `show_settings_menu` -> native menu with "Open at startup", "Start minimized", "Clear cache", "Quit".
-  - Handled on the backend with `.on_menu_event(...)`.
-  - Native menus render outside the webview, match the system's Breeze/KDE Dark theme, and are never clipped.
+### 2. Link Policy & Interception
+- Internal Google domains (`mail.google.com`, `calendar.google.com`, `drive.google.com`, `docs.google.com`, `*.google.com`, `*.googleusercontent.com`, `*.gstatic.com`) stay strictly inside the shell and open as tabs.
+- External URLs automatically open in the user's system default browser via `shell.openExternal`.
 
-### 3. Instant Boot & Lazy Tab Loading (No Wayland/NVIDIA GPU Race)
-- **Problem**: Spawning multiple `WebKitWebProcess` instances simultaneously at boot overwhelmed the Wayland/NVIDIA EGL compositor, causing blank white pages and requiring 4+ seconds of artificial `sleep()` delays. Additionally, if launched minimized, Wayland never sent `Resized` events, causing boot to hang indefinitely.
-- **Solution**:
-  - Instant boot: Startup now only spawns the `tabbar` and the single active tab.
-  - Startup delay reduced from 4+ seconds to instant.
-  - Other tabs from `state.json` are restored into `TabsState` and rendered immediately in the tabbar strip.
-  - Background tabs load on demand (lazy loading): when the user clicks a tab, its webview is created and displayed.
-  - `ensure_booted(&app)` is called both on `WindowEvent::Resized` and when unhiding from the system tray, fixing the start-minimized boot hang.
+### 3. Native Menus (KDE Plasma Styled)
+- Click `+` button: Native dropdown menu to open any of the 10 Google Suite apps.
+- Right-click tab: "Apri nel browser predefinito" (opens externally and closes tab), "Ricarica scheda", "Duplica scheda", "Chiudi scheda", "Chiudi le altre schede".
+- Click gear ⚙: "Avvia all'avvio del sistema", "Avvia ridotto a icona", "Cancella cache...", "Esci".
 
-### 4. Tray Icon Left-Click Fix
-- **Problem**: In `tray.rs`, `self.0.get_webview_window("hub")` returned `None` because the hub window was constructed with `tauri::WindowBuilder`, not `WebviewWindowBuilder`. Left-clicking the tray icon did nothing.
-- **Solution**: Switched to `self.0.get_window("hub")` in `activate()` and `secondary_activate()`, properly toggling visibility and focusing the window.
+### 4. Google Login & Hardware Acceleration Fixes
+- User-Agent automatically strips `Electron/...` so Google Accounts sign-in works without "Browser not secure" warnings.
+- WebRTC PipeWire screen capturer enabled (`WebRTCPipeWireCapturer`) for Google Meet screen sharing on Wayland.
+- Permissions (mic, camera, display-capture, notifications) automatically handled for Google domains.
 
-## User requirements checklist
+### 5. System Tray & Single Instance
+- KDE StatusNotifierItem tray icon (`icons/icon.png`).
+- Left-click tray icon toggles window visibility.
+- Right-click tray menu provides direct jumps to Gmail, Calendar, Drive, Meet, Chat, and Quit.
+- Close-to-tray: Closing the window hides it to tray rather than exiting.
+- State (`~/.config/gapps/state.json`) and settings (`~/.config/gapps/settings.json`) persist across restarts.
 
-1. [x] Browser-style tabs in ONE window; pick apps from a `+` menu; tab layout saved across restarts. Right-click tab → open in browser (then close the tab).
-2. [x] Internal Google links (Drive→Docs, Gmail→Sheets…) stay inside the shell as tabs; external links open in the system default browser.
-3. [x] Settings: Open at startup, Start minimized, Clear cache (notifies user).
-4. [x] Reload button in the strip (⟳).
-5. [x] Notifications, close-to-tray, start minimized/autostart.
-6. [x] No "chrome" in user-facing UI.
+---
 
-## Environment details
-- OS: Kubuntu 26.04, KDE Plasma 6.6 Wayland, NVIDIA GPU.
-- WebKitGTK 4.1, GTK3, Rust Tauri 2 (with `unstable` feature for multi-webview).
-- Webcal default: gapps. Mailto default: user prefers Betterbird.
+## How to Run
+
+From the project root:
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Start the application
+npm start
+```
+
+Or run via npx:
+```bash
+npx electron .
+```
