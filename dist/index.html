@@ -9,29 +9,9 @@
     <div id="tabs"></div>
     <button id="new" title="New tab">+</button>
     <div id="drag" data-tauri-drag-region></div>
-    <span id="debug"></span>
     <button id="reload" title="Reload page">&#10227;</button>
     <button id="gear" title="Settings">&#9881;</button>
   </div>
-
-  <div id="appmenu" class="popup hidden"></div>
-
-  <div id="ctx" class="popup hidden">
-    <div class="ctx-item" id="ctx-browser">Open in browser</div>
-    <div class="ctx-item" id="ctx-close">Close tab</div>
-  </div>
-
-  <div id="settings" class="hidden">
-    <h3>Settings</h3>
-    <label><input type="checkbox" id="set-autostart" /> Open at startup</label>
-    <label><input type="checkbox" id="set-minimized" /> Start minimized</label>
-    <div class="row">
-      <button id="clear-cache">Clear cache</button>
-      <span id="cache-msg"></span>
-    </div>
-    <button id="settings-close">Close</button>
-  </div>
-
   <script src="app.js"></script>
 </body>
 </html>

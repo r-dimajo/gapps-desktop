@@ -45,6 +45,11 @@ impl ksni::Tray for TrayIcon {
                 StandardItem {
                     label: a.title.into(),
                     activate: Box::new(move |t: &mut Self| {
+                        if let Some(w) = t.0.get_window("hub") {
+                            w.show().ok();
+                            w.set_focus().ok();
+                        }
+                        crate::ensure_booted(&t.0);
                         let _ = open_app_tab(&t.0, a);
                     }),
                     ..Default::default()
@@ -76,19 +81,21 @@ impl ksni::Tray for TrayIcon {
     }
     // left click on Plasma = activate: toggle the hub window
     fn activate(&mut self, _x: i32, _y: i32) {
-        if let Some(w) = self.0.get_webview_window("hub") {
+        if let Some(w) = self.0.get_window("hub") {
             if w.is_visible().unwrap_or(false) {
                 w.hide().ok();
             } else {
                 w.show().ok();
                 w.set_focus().ok();
+                crate::ensure_booted(&self.0);
             }
         }
     }
     fn secondary_activate(&mut self, _x: i32, _y: i32) {
-        if let Some(w) = self.0.get_webview_window("hub") {
+        if let Some(w) = self.0.get_window("hub") {
             w.show().ok();
             w.set_focus().ok();
+            crate::ensure_booted(&self.0);
         }
     }
 }

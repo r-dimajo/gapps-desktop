@@ -2,16 +2,17 @@ mod apps;
 mod state;
 mod tray;
 
-use apps::AppDef;
+pub use apps::{by_id, APPS, AppDef};
 use state::TabsState;
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Rect,
+    menu::{CheckMenuItemBuilder, ContextMenu, MenuBuilder, MenuItemBuilder},
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
     WebviewBuilder, WebviewUrl, WindowEvent,
 };
 use tauri::webview::NewWindowResponse;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-const STRIP: f64 = 36.0;
+pub const STRIP: f64 = 36.0;
 
 // window client size in logical px. On Wayland inner_size() returns 0 until
 // the compositor sends the first configure — fall back to builder dims then.
@@ -49,6 +50,30 @@ fn open_external(url: &tauri::Url) {
     let _ = std::process::Command::new("xdg-open").arg(url.as_str()).spawn();
 }
 
+// layout: on Linux/GTK, Tauri's default_vbox() holds the child webviews.
+// By default add_child packs children with expand = true, dividing height equally.
+// Setting expand = false and size_request = 36 on the tabbar ensures it occupies
+// exactly 36 logical px, while the active content webview receives all remaining height.
+#[cfg(target_os = "linux")]
+pub fn apply_gtk_layout(window: &tauri::Window) {
+    use gtk::prelude::*;
+    let window = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(vbox) = window.default_vbox() else { return };
+        let children = vbox.children();
+        if let Some(tabbar) = children.first() {
+            vbox.set_child_packing(tabbar, false, false, 0, gtk::PackType::Start);
+            tabbar.set_size_request(-1, STRIP as i32);
+        }
+        for content in children.iter().skip(1) {
+            vbox.set_child_packing(content, true, true, 0, gtk::PackType::Start);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn apply_gtk_layout(_window: &tauri::Window) {}
+
 // navigation policy for app webviews: internal hosts stay, everything else
 // goes to the system browser. Records the tab's current url/app.
 fn nav_policy(app: &AppHandle, id: u64, url: &tauri::Url) -> bool {
@@ -65,8 +90,6 @@ fn nav_policy(app: &AppHandle, id: u64, url: &tauri::Url) -> bool {
     state::save(app);
     state::emit(app);
     match url.scheme() {
-        // only these ever leave the shell; anything else (about:blank,
-        // blob:, javascript:...) is denied silently
         "http" | "https" => {
             if apps::is_internal(url.host_str().unwrap_or("")) {
                 true
@@ -83,7 +106,7 @@ fn nav_policy(app: &AppHandle, id: u64, url: &tauri::Url) -> bool {
     }
 }
 
-// create the webview backing an already-registered tab (or register + create)
+// create the webview backing an already-registered tab
 fn create_webview(
     app: &AppHandle,
     id: u64,
@@ -116,8 +139,6 @@ fn create_webview(
             }
         })
         .on_new_window(move |url, _| {
-            // target=_blank: internal → new tab, external → system browser,
-            // about:blank etc. → denied silently (no empty browser tabs)
             let internal =
                 matches!(url.scheme(), "http" | "https") && apps::is_internal(url.host_str().unwrap_or(""));
             if internal {
@@ -142,6 +163,9 @@ fn create_webview(
             LogicalSize::new(w, h - STRIP),
         )
         .map_err(|e| e.to_string())?;
+
+    apply_gtk_layout(&window);
+
     if hidden {
         if let Some(wv) = app.get_webview(&format!("tab-{id}")) {
             wv.hide().ok();
@@ -186,25 +210,34 @@ fn activate_tab_impl(app: &AppHandle, id: u64) -> Result<(), String> {
     let Some(window) = app.get_window("hub") else {
         return Err("no hub window".into());
     };
-    let (w, h) = client_logical(&window);
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let strip_h = (STRIP * scale) as u32;
+
+    // Lazy load: if webview does not exist yet, create it on demand
+    let label = format!("tab-{id}");
+    if app.get_webview(&label).is_none() {
+        let tab_info = {
+            let st = app.state::<TabsState>();
+            let guard = st.0.lock().unwrap();
+            guard.tabs.iter().find(|t| t.id == id).map(|t| (t.url.clone(), t.app.clone()))
+        };
+        if let Some((url_str, app_id)) = tab_info {
+            let parsed: tauri::Url = url_str.parse().unwrap_or_else(|_| {
+                apps::by_id("gmail").unwrap().url.parse().unwrap()
+            });
+            let def_id = apps::by_id(&app_id).map(|d| d.id).unwrap_or("custom");
+            create_webview(app, id, parsed, def_id, false)?;
+        }
+    }
+
     {
         let st = app.state::<TabsState>();
         i_active(&st, id);
     }
+
     for wv in window.webviews() {
         match state::label_id(wv.label()) {
             Some(tid) if tid == id => {
-                let _ = wv.set_bounds(Rect {
-                    position: PhysicalPosition::new(0, strip_h as i32).into(),
-                    size: PhysicalSize::new(
-                        (w * scale) as u32,
-                        ((h - STRIP) * scale) as u32,
-                    )
-                    .into(),
-                });
                 wv.show().ok();
+                wv.set_focus().ok();
             }
             Some(_) => {
                 wv.hide().ok();
@@ -212,6 +245,8 @@ fn activate_tab_impl(app: &AppHandle, id: u64) -> Result<(), String> {
             None => {}
         }
     }
+
+    apply_gtk_layout(&window);
     state::save(app);
     state::emit(app);
     Ok(())
@@ -221,122 +256,99 @@ fn i_active(st: &tauri::State<TabsState>, id: u64) {
     st.0.lock().unwrap().active = id;
 }
 
-// Wayland: webviews created before the compositor maps the window render
-// blank. Boot every webview on the first Resized with a real size instead.
 static BOOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static PENDING_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 
-fn boot_webviews(app: &AppHandle) {
-    use std::sync::atomic::Ordering;
-    if BOOTED.swap(true, Ordering::SeqCst) {
+pub fn ensure_booted(app: &AppHandle) {
+    if BOOTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     let Some(window) = app.get_window("hub") else { return };
     let (w, _) = client_logical(&window);
-    if window
-        .add_child(
-            WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
-            LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(w, STRIP),
-        )
-        .is_err()
-    {
-        eprintln!("tabbar failed");
+
+    // 1. Create tabbar webview
+    if let Err(e) = window.add_child(
+        WebviewBuilder::new("tabbar", WebviewUrl::App("index.html".into())),
+        LogicalPosition::new(0.0, 0.0),
+        LogicalSize::new(w, STRIP),
+    ) {
+        eprintln!("Failed to create tabbar: {e}");
         return;
     }
 
-    let (tabs, active) = {
-        let st = app.state::<TabsState>();
-        let guard = st.0.lock().unwrap();
-        (
-            guard
-                .tabs
-                .iter()
-                .map(|t| (t.id, t.url.clone(), t.app.clone()))
-                .collect::<Vec<_>>(),
-            guard.active,
-        )
-    };
+    apply_gtk_layout(&window);
 
-    // Stagger webview creation: spawning many WebKitWebProcesses at once on
-    // this driver (NVIDIA/Wayland) leaves them blank. One per ~300ms is fine.
-    let mut ordered: Vec<(u64, String, String)> = tabs.iter().cloned().collect();
-    if let Some(p) = ordered.iter().position(|(id, _, _)| *id == active) {
-        let a = ordered.remove(p);
-        ordered.insert(0, a);
-    }
-    let app2 = app.clone();
-    std::thread::spawn(move || {
-        // WebKit remote webviews wedge when spawned during process startup —
-        // give the GPU/network processes time to settle first
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-        if ordered.is_empty() {
-            let _ = add_tab(
-                &app2,
-                apps::by_id("gmail").unwrap().url.parse().unwrap(),
-                "gmail",
-                true,
-            );
-        }
-        for (n, (id, url, app_id)) in ordered.into_iter().enumerate() {
-            let parsed: tauri::Url = url.parse().unwrap_or_else(|_| {
-                apps::by_id("gmail").unwrap().url.parse().unwrap()
+    // 2. Determine active tab from persisted state
+    let (active_id, active_url, active_app) = {
+        let st = app.state::<TabsState>();
+        let mut guard = st.0.lock().unwrap();
+        if guard.tabs.is_empty() {
+            let gmail = apps::by_id("gmail").unwrap();
+            let id = guard.next_id;
+            guard.next_id += 1;
+            guard.tabs.push(state::Tab {
+                id,
+                url: gmail.url.to_string(),
+                app: "gmail".into(),
+                title: "Gmail".into(),
             });
-            let app_id = apps::by_id(&app_id).map(|d| d.id).unwrap_or("custom");
-            let _ = create_webview(&app2, id, parsed, app_id, true);
-            if n == 0 {
-                let _ = activate_tab_impl(&app2, id);
+            guard.active = id;
+            (id, gmail.url.to_string(), "gmail".into())
+        } else {
+            let active = guard.active;
+            let tab = guard.tabs.iter().find(|t| t.id == active).or_else(|| guard.tabs.first()).cloned();
+            match tab {
+                Some(t) => {
+                    guard.active = t.id;
+                    (t.id, t.url, t.app)
+                }
+                None => {
+                    let gmail = apps::by_id("gmail").unwrap();
+                    let id = guard.next_id;
+                    guard.next_id += 1;
+                    guard.tabs.push(state::Tab {
+                        id,
+                        url: gmail.url.to_string(),
+                        app: "gmail".into(),
+                        title: "Gmail".into(),
+                    });
+                    guard.active = id;
+                    (id, gmail.url.to_string(), "gmail".into())
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(700));
         }
-        if let Some(args) = PENDING_ARGS.get() {
-            for a in args {
-                launch_arg(&app2, a);
-            }
-        }
+    };
+    state::save(app);
+    state::emit(app);
+
+    // 3. Create ONLY the active tab on startup (other tabs load on demand)
+    let parsed: tauri::Url = active_url.parse().unwrap_or_else(|_| {
+        apps::by_id("gmail").unwrap().url.parse().unwrap()
     });
-    relayout(app);
-}
+    let app_id = apps::by_id(&active_app).map(|d| d.id).unwrap_or("custom");
+    let _ = create_webview(app, active_id, parsed, app_id, false);
 
-// layout: strip on top, active tab fills the rest — on every window resize
-fn relayout(app: &AppHandle) {
-    let Some(window) = app.get_window("hub") else { return };
-    let (w, h) = client_logical(&window);
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let strip_h = (STRIP * scale) as u32;
-    let active = {
-        let st = app.state::<TabsState>();
-        let guard = st.0.lock().unwrap();
-        guard.active
-    };
-    for wv in window.webviews() {
-        if wv.label() == "tabbar" {
-            let _ = wv.set_bounds(Rect {
-                position: PhysicalPosition::new(0, 0).into(),
-                size: PhysicalSize::new((w * scale) as u32, strip_h).into(),
-            });
-        } else if state::label_id(wv.label()) == Some(active) {
-            let _ = wv.set_bounds(Rect {
-                position: PhysicalPosition::new(0, strip_h as i32).into(),
-                size: PhysicalSize::new(
-                    (w * scale) as u32,
-                    ((h - STRIP) * scale) as u32,
-                )
-                .into(),
-            });
+    // 4. Handle any initial launch arguments
+    if let Some(args) = PENDING_ARGS.get() {
+        for a in args {
+            launch_arg(app, a);
         }
     }
 }
 
-// route an argv value (desktop handler / manual) to a tab
 pub fn launch_arg(app: &AppHandle, arg: &str) {
+    if let Some(w) = app.get_window("hub") {
+        w.show().ok();
+        w.set_focus().ok();
+    }
+    ensure_booted(app);
+
     let lower = arg.to_ascii_lowercase();
     if let Some(def) = apps::by_id(&lower) {
         let _ = open_app_tab(app, def);
         return;
     }
     if lower.starts_with("mailto:") {
-        // Gmail compose prefilled from the mailto target
         if let Ok(url) = tauri::Url::parse_with_params(
             "https://mail.google.com/mail/",
             &[
@@ -372,7 +384,13 @@ pub fn launch_arg(app: &AppHandle, arg: &str) {
     }
 }
 
-fn open_app_tab(app: &AppHandle, def: &'static AppDef) -> Result<(), String> {
+pub fn open_app_tab(app: &AppHandle, def: &'static AppDef) -> Result<(), String> {
+    if let Some(w) = app.get_window("hub") {
+        w.show().ok();
+        w.set_focus().ok();
+    }
+    ensure_booted(app);
+
     let existing = {
         let st = app.state::<TabsState>();
         let guard = st.0.lock().unwrap();
@@ -450,6 +468,10 @@ fn close_tab(app: AppHandle, id: u64) -> Result<(), String> {
     match next {
         (true, Some(n)) => activate_tab_impl(&app, n),
         (true, None) => {
+            {
+                let st = app.state::<TabsState>();
+                st.0.lock().unwrap().active = 0;
+            }
             state::save(&app);
             state::emit(&app);
             Ok(())
@@ -524,44 +546,105 @@ fn set_settings(
 
 #[tauri::command]
 fn clear_cache(app: AppHandle) -> Result<(), String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
-    // cookies/localstorage/offline storage survive; only page caches go
-    for sub in ["WebKitCache", "CacheStorage"] {
-        let _ = std::fs::remove_dir_all(dir.join(sub));
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let _ = std::fs::remove_dir_all(&cache_dir);
     }
+    if let Ok(dir) = app.path().app_data_dir() {
+        for sub in ["WebKitCache", "CacheStorage"] {
+            let _ = std::fs::remove_dir_all(dir.join(sub));
+        }
+    }
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("gapps")
+        .body("Cache cleared successfully")
+        .show();
     Ok(())
 }
 
 #[tauri::command]
-fn debug_info(app: AppHandle) -> serde_json::Value {
-    let Some(window) = app.get_window("hub") else {
-        return serde_json::json!({"err": "no hub"});
-    };
-    let scale = window.scale_factor().unwrap_or(0.0);
-    let inner = window
-        .inner_size()
-        .map(|i| format!("{}x{}", i.width, i.height))
-        .unwrap_or_else(|_| "err".into());
-    let mut views = Vec::new();
-    for wv in window.webviews() {
-        let b = wv
-            .bounds()
-            .map(|r| {
-                format!(
-                    "{},{} {}x{}",
-                    r.position.to_physical::<i32>(scale).x,
-                    r.position.to_physical::<i32>(scale).y,
-                    r.size.to_physical::<u32>(scale).width,
-                    r.size.to_physical::<u32>(scale).height
-                )
-            })
-            .unwrap_or_else(|_| "err".into());
-        views.push(serde_json::json!({"label": wv.label(), "bounds": b}));
+fn show_app_menu(app: AppHandle) -> Result<(), String> {
+    let window = app.get_window("hub").ok_or("no hub window")?;
+    let mut builder = MenuBuilder::new(&app);
+    for a in apps::APPS {
+        let item = MenuItemBuilder::with_id(format!("open_app_{}", a.id), a.title)
+            .build(&app)
+            .map_err(|e| e.to_string())?;
+        builder = builder.item(&item);
     }
-    serde_json::json!({"inner": inner, "scale": scale, "views": views})
+    let menu = builder.build().map_err(|e| e.to_string())?;
+    menu.popup(window).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn show_tab_menu(app: AppHandle, id: u64) -> Result<(), String> {
+    let window = app.get_window("hub").ok_or("no hub window")?;
+    let menu = MenuBuilder::new(&app)
+        .item(
+            &MenuItemBuilder::with_id(format!("browser_{id}"), "Open in browser")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .item(
+            &MenuItemBuilder::with_id(format!("reload_{id}"), "Reload")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id(format!("close_{id}"), "Close tab")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .build()
+        .map_err(|e| e.to_string())?;
+    menu.popup(window).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn show_settings_menu(app: AppHandle) -> Result<(), String> {
+    let window = app.get_window("hub").ok_or("no hub window")?;
+    let (startup, minimized) = {
+        let st = app.state::<TabsState>();
+        let guard = st.0.lock().unwrap();
+        (
+            guard.settings.open_at_startup,
+            guard.settings.start_minimized,
+        )
+    };
+    let menu = MenuBuilder::new(&app)
+        .item(
+            &CheckMenuItemBuilder::with_id("toggle_startup", "Open at startup")
+                .checked(startup)
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .item(
+            &CheckMenuItemBuilder::with_id("toggle_minimized", "Start minimized")
+                .checked(minimized)
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("clear_cache", "Clear cache")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("quit", "Quit")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .build()
+        .map_err(|e| e.to_string())?;
+    menu.popup(window).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn main() {
@@ -578,6 +661,44 @@ fn main() {
             None::<Vec<&str>>,
         ))
         .plugin(tauri_plugin_notification::init())
+        .on_menu_event(|app, event| {
+            let id_str = event.id().as_ref();
+            if let Some(app_id) = id_str.strip_prefix("open_app_") {
+                if let Some(def) = apps::by_id(app_id) {
+                    let _ = open_app_tab(app, def);
+                }
+            } else if let Some(tab_id_str) = id_str.strip_prefix("browser_") {
+                if let Ok(tid) = tab_id_str.parse::<u64>() {
+                    open_in_browser(app.clone(), tid);
+                }
+            } else if let Some(tab_id_str) = id_str.strip_prefix("reload_") {
+                if let Ok(tid) = tab_id_str.parse::<u64>() {
+                    if let Some(wv) = app.get_webview(&format!("tab-{tid}")) {
+                        wv.reload().ok();
+                    }
+                }
+            } else if let Some(tab_id_str) = id_str.strip_prefix("close_") {
+                if let Ok(tid) = tab_id_str.parse::<u64>() {
+                    let _ = close_tab(app.clone(), tid);
+                }
+            } else if id_str == "toggle_startup" {
+                let current = {
+                    let st = app.state::<TabsState>();
+                    st.0.lock().unwrap().settings.open_at_startup
+                };
+                set_settings(app.clone(), Some(!current), None);
+            } else if id_str == "toggle_minimized" {
+                let current = {
+                    let st = app.state::<TabsState>();
+                    st.0.lock().unwrap().settings.start_minimized
+                };
+                set_settings(app.clone(), None, Some(!current));
+            } else if id_str == "clear_cache" {
+                let _ = clear_cache(app.clone());
+            } else if id_str == "quit" {
+                app.exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_state,
             list_apps,
@@ -589,7 +710,9 @@ fn main() {
             reload_active,
             set_settings,
             clear_cache,
-            debug_info
+            show_app_menu,
+            show_tab_menu,
+            show_settings_menu
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -609,7 +732,6 @@ fn main() {
                 .visible(!start_min)
                 .build()?;
 
-            // webviews are created later, on the first real window size
             let _ = PENDING_ARGS.set(
                 args.iter()
                     .filter(|a| !a.starts_with('-'))
@@ -622,7 +744,6 @@ fn main() {
         })
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
-                // close-to-tray
                 api.prevent_close();
                 window.hide().ok();
             }
@@ -631,18 +752,15 @@ fn main() {
                     && size.width > 0
                     && size.height > 0
                 {
-                    // boot off the event-loop thread: creating remote webviews
-                    // inline during event dispatch renders blank on webkitgtk
                     let app = window.app_handle().clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(120));
-                        boot_webviews(&app);
-                    });
+                    ensure_booted(&app);
                 } else {
-                    relayout(window.app_handle());
+                    apply_gtk_layout(window);
                 }
             }
-            WindowEvent::Focused(_) => relayout(window.app_handle()),
+            WindowEvent::Focused(_) => {
+                apply_gtk_layout(window);
+            }
             _ => {}
         })
         .run(tauri::generate_context!())
