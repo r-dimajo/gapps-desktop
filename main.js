@@ -15,8 +15,10 @@ const path = require('path');
 const fs = require('fs');
 const { APPS, byId, byHost, detectApp, isInternal } = require('./apps');
 
-// Linux Wayland and WebRTC PipeWire hardware flags
+// Linux Wayland, sandbox, and WebRTC PipeWire hardware flags
 if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-setuid-sandbox');
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer,WaylandWindowDecorations');
 }
