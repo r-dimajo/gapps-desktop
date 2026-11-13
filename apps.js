@@ -7,6 +7,7 @@ const APPS = [
   { id: "slides",   title: "Slides",   description: "Presentazioni multimediali",   url: "https://slides.google.com",   host: "slides.google.com",   color: "#f4b400" },
   { id: "meet",     title: "Meet",     description: "Videochiamate e riunioni",     url: "https://meet.google.com",     host: "meet.google.com",     color: "#00897b" },
   { id: "chat",     title: "Chat",     description: "Messaggi diretti e canali",    url: "https://chat.google.com",     host: "chat.google.com",     color: "#34a853" },
+  { id: "gemini",   title: "Gemini",   description: "Assistente IA conversazionale", url: "https://gemini.google.com",   host: "gemini.google.com",   color: "#8ab4f8" },
   { id: "keep",     title: "Keep",     description: "Note rapide ed elenchi",       url: "https://keep.google.com",     host: "keep.google.com",     color: "#fbbc04" },
   { id: "tasks",    title: "Tasks",    description: "Gestione attività e to-do",    url: "https://tasks.google.com",    host: "tasks.google.com",    color: "#4285f4" },
 ];

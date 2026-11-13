@@ -243,6 +243,8 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     displayTitle = title ? `Google Calendar • ${title}` : 'Promemoria Google Calendar';
   } else if (appId === 'meet') {
     displayTitle = title ? `Google Meet • ${title}` : 'Google Meet';
+  } else if (appId === 'gemini') {
+    displayTitle = title ? `Gemini • ${title}` : 'Google Gemini';
   } else if (appDef && !displayTitle.toLowerCase().includes(appDef.title.toLowerCase())) {
     displayTitle = `${appDef.title} • ${displayTitle}`;
   }

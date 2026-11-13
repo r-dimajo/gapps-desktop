@@ -16,6 +16,8 @@ const ICONS = {
 
   chat: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="#00AC47" d="M19 2H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h2v3.5a.5.5 0 0 0 .8.4L12 18h7a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3z"/><path fill="#FFF" d="M6 7h12v1.8H6zm0 3.2h8V12H6z"/></svg>`,
 
+  gemini: `<svg viewBox="0 0 24 24" width="100%" height="100%"><defs><linearGradient id="gemini-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="35%" stop-color="#9B72CB"/><stop offset="70%" stop-color="#D96570"/><stop offset="100%" stop-color="#1BA1E3"/></linearGradient></defs><path fill="url(#gemini-grad)" d="M12 2C12 7.52 7.52 12 2 12C7.52 12 12 16.48 12 22C12 16.48 16.48 12 22 12C16.48 12 12 7.52 12 2Z"/></svg>`,
+
   keep: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="#FFBB00" d="M9 21h6v-1.5H9zm3-19a7 7 0 0 0-4.9 12c.7.7 1.2 1.6 1.4 2.5h7c.2-.9.7-1.8 1.4-2.5A7 7 0 0 0 12 2z"/><path fill="#FFF" d="M12 4a5 5 0 0 0-3.5 8.5l.5.5c.6.6 1 1.4 1.2 2.2h3.6c.2-.8.6-1.6 1.2-2.2l.5-.5A5 5 0 0 0 12 4z"/><path fill="#FFD043" d="M10 17.5h4v1.5h-4z"/></svg>`,
 
   tasks: `<svg viewBox="0 0 24 24" width="100%" height="100%"><circle cx="12" cy="12" r="10" fill="#1A73E8"/><path fill="#FFF" d="m10 15.5-3.5-3.5 1.4-1.4 2.1 2.1 5.6-5.6 1.4 1.4z"/><circle cx="17.5" cy="6.5" r="3" fill="#FBBC04"/><path fill="#EA4335" d="M17.5 4.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>`,

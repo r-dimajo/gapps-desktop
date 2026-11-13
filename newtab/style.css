@@ -117,14 +117,14 @@ body {
 
 .apps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 16px;
   width: 100%;
 }
 
 @media (min-width: 860px) {
   .apps-grid {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   }
 }
 
