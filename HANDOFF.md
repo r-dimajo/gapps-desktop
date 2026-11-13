@@ -13,7 +13,7 @@ google-suite-linux/
 ├── HANDOFF.md              ← Project documentation
 ├── package.json            ← Node/Electron dependencies & start script
 ├── .npmrc                  ← Disables progress bar to prevent KDE Konsole crash
-├── apps.js                 ← Google Suite registry (10 apps) & URL routing helpers
+├── apps.js                 ← Google Suite registry (11 apps, incl. Gemini) & URL routing helpers
 ├── svg-icons.js            ← Official 4-color Google Workspace SVG icons & UI symbols
 ├── main.js                 ← Electron main process: views, menus, tray, IPC, persistence
 ├── preload.js              ← Context bridge exposing safe gapps API to tab strip & new tab
@@ -44,11 +44,11 @@ google-suite-linux/
 
 ### 2. New Tab Page (App Launcher Grid)
 - Clicking `+` (or `Ctrl+T`) opens a Google Workspace dashboard grid rather than a plain dropdown.
-- Shows all 10 apps with official 4-color SVG icons, descriptions, and keyboard shortcuts (1-9).
+- Shows all 11 apps with official SVG icons, descriptions, and keyboard shortcuts.
 - Includes a Google Search and URL navigation bar.
 
 ### 3. Authentic SVG Icons
-- All 10 apps (Gmail, Calendar, Drive, Docs, Sheets, Slides, Meet, Chat, Keep, Tasks) display official vector SVG icons in both the tab strip and the New Tab grid.
+- All 11 apps (Gmail, Calendar, Drive, Docs, Sheets, Slides, Meet, Chat, Gemini, Keep, Tasks) display official vector SVG icons in both the tab strip and the New Tab grid.
 
 ### 4. Schede Fissate (Pinned Tabs)
 - Right-click any tab and choose "Fissa scheda (Pin)".
