@@ -7,11 +7,23 @@ let apps = [];
 const $ = (id) => document.getElementById(id);
 
 async function activate(id) {
-  await invoke("activate_tab", { id });
+  if (S) {
+    S.active = id;
+    render();
+  }
+  try {
+    await invoke("activate_tab", { id });
+  } catch (e) {
+    console.error("activate_tab error:", e);
+  }
 }
 
 async function close(id) {
-  await invoke("close_tab", { id });
+  try {
+    await invoke("close_tab", { id });
+  } catch (e) {
+    console.error("close_tab error:", e);
+  }
 }
 
 function renderTabs() {
@@ -47,13 +59,17 @@ function render() {
 }
 
 async function boot() {
-  apps = await invoke("list_apps");
-  S = await invoke("get_state");
-  render();
-  await listen("tabs", (e) => {
-    S = e.payload;
+  try {
+    apps = await invoke("list_apps");
+    S = await invoke("get_state");
     render();
-  });
+    await listen("tabs", (e) => {
+      S = e.payload;
+      render();
+    });
+  } catch (err) {
+    console.error("boot error:", err);
+  }
 }
 
 $("new").addEventListener("click", () => invoke("show_app_menu"));

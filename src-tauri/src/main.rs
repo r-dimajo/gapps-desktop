@@ -648,6 +648,10 @@ fn show_settings_menu(app: AppHandle) -> Result<(), String> {
 }
 
 fn main() {
+    // WebKitGTK on NVIDIA + Wayland (KDE Plasma): DMA-BUF rendering causes completely
+    // blank/white pages. WEBKIT_DISABLE_DMABUF_RENDERER forces the working rendering path.
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
     fix_snap_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
     tauri::Builder::default()

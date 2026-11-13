@@ -2,9 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
   "description": "tab strip UI IPC",
-  "windows": ["tabbar"],
+  "windows": ["hub"],
+  "webviews": ["tabbar"],
   "permissions": [
     "core:default",
+    "core:event:default",
     "core:window:allow-start-dragging"
   ]
 }
