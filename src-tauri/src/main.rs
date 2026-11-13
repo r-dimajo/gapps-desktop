@@ -267,6 +267,9 @@ fn boot_webviews(app: &AppHandle) {
     }
     let app2 = app.clone();
     std::thread::spawn(move || {
+        // WebKit remote webviews wedge when spawned during process startup —
+        // give the GPU/network processes time to settle first
+        std::thread::sleep(std::time::Duration::from_millis(2000));
         if ordered.is_empty() {
             let _ = add_tab(
                 &app2,
@@ -284,7 +287,7 @@ fn boot_webviews(app: &AppHandle) {
             if n == 0 {
                 let _ = activate_tab_impl(&app2, id);
             }
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::thread::sleep(std::time::Duration::from_millis(700));
         }
         if let Some(args) = PENDING_ARGS.get() {
             for a in args {
@@ -532,6 +535,35 @@ fn clear_cache(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn debug_info(app: AppHandle) -> serde_json::Value {
+    let Some(window) = app.get_window("hub") else {
+        return serde_json::json!({"err": "no hub"});
+    };
+    let scale = window.scale_factor().unwrap_or(0.0);
+    let inner = window
+        .inner_size()
+        .map(|i| format!("{}x{}", i.width, i.height))
+        .unwrap_or_else(|_| "err".into());
+    let mut views = Vec::new();
+    for wv in window.webviews() {
+        let b = wv
+            .bounds()
+            .map(|r| {
+                format!(
+                    "{},{} {}x{}",
+                    r.position.to_physical::<i32>(scale).x,
+                    r.position.to_physical::<i32>(scale).y,
+                    r.size.to_physical::<u32>(scale).width,
+                    r.size.to_physical::<u32>(scale).height
+                )
+            })
+            .unwrap_or_else(|_| "err".into());
+        views.push(serde_json::json!({"label": wv.label(), "bounds": b}));
+    }
+    serde_json::json!({"inner": inner, "scale": scale, "views": views})
+}
+
 fn main() {
     fix_snap_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -556,7 +588,8 @@ fn main() {
             open_in_browser,
             reload_active,
             set_settings,
-            clear_cache
+            clear_cache,
+            debug_info
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

@@ -75,10 +75,20 @@ function renderSettings() {
   $("set-minimized").checked = S.settings.start_minimized;
 }
 
+function renderDebug() {
+  invoke("debug_info")
+    .then((d) => {
+      const el = $("debug");
+      el.textContent = `${d.inner} s${d.scale} | ` + d.views.map((v) => `${v.label} ${v.bounds}`).join(" | ");
+    })
+    .catch((e) => ($("debug").textContent = "dbg err " + e));
+}
+
 function render() {
   if (!S) return;
   renderTabs();
   renderSettings();
+  renderDebug();
 }
 
 async function boot() {

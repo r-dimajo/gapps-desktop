@@ -88,6 +88,17 @@ button:hover { color: var(--fg); background: #35363a; }
 
 #drag { flex: 1; }
 
+#debug {
+  color: #f28b82;
+  font-family: monospace;
+  font-size: 10px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 40vw;
+  pointer-events: none;
+}
+
 .popup {
   position: fixed;
   background: #292a2d;
