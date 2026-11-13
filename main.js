@@ -9,7 +9,8 @@ const {
   ipcMain,
   dialog,
   session,
-  desktopCapturer
+  desktopCapturer,
+  globalShortcut
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -35,6 +36,7 @@ const CONFIG_DIR = path.join(app.getPath('userData'));
 const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
 const ICON_PATH = path.join(__dirname, 'icons', 'icon.png');
+const NEW_TAB_URL = 'file://' + path.join(__dirname, 'newtab', 'index.html');
 
 let mainWindow = null;
 let tabbarView = null;
@@ -48,7 +50,8 @@ let state = {
 
 let settings = {
   open_at_startup: false,
-  start_minimized: false
+  start_minimized: false,
+  memory_saver: true
 };
 
 // Map of tabId -> WebContentsView
@@ -79,7 +82,14 @@ function loadState() {
     if (fs.existsSync(STATE_FILE)) {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
       if (data && Array.isArray(data.tabs) && data.tabs.length > 0) {
-        state.tabs = data.tabs;
+        state.tabs = data.tabs.map((t) => ({
+          ...t,
+          pinned: Boolean(t.pinned),
+          unreadCount: 0,
+          isAudible: false,
+          isMuted: false,
+          lastAccessed: Date.now()
+        }));
         state.active = data.active || data.tabs[0].id;
         return;
       }
@@ -91,7 +101,19 @@ function loadState() {
   // Default initial tab: Gmail
   const defaultApp = byId('gmail') || APPS[0];
   const id = 'tab_' + Date.now();
-  state.tabs = [{ id, app: defaultApp.id, title: defaultApp.title, url: defaultApp.url }];
+  state.tabs = [
+    {
+      id,
+      app: defaultApp.id,
+      title: defaultApp.title,
+      url: defaultApp.url,
+      pinned: false,
+      unreadCount: 0,
+      isAudible: false,
+      isMuted: false,
+      lastAccessed: Date.now()
+    }
+  ];
   state.active = id;
 }
 
@@ -105,7 +127,13 @@ function saveState() {
         STATE_FILE,
         JSON.stringify(
           {
-            tabs: state.tabs.map((t) => ({ id: t.id, app: t.app, title: t.title, url: t.url })),
+            tabs: state.tabs.map((t) => ({
+              id: t.id,
+              app: t.app,
+              title: t.title,
+              url: t.url,
+              pinned: Boolean(t.pinned)
+            })),
             active: state.active
           },
           null,
@@ -122,10 +150,29 @@ function saveState() {
 function broadcastState() {
   if (tabbarView && !tabbarView.webContents.isDestroyed()) {
     tabbarView.webContents.send('state-update', {
-      tabs: state.tabs.map((t) => ({ id: t.id, app: t.app, title: t.title, url: t.url })),
+      tabs: state.tabs.map((t) => ({
+        id: t.id,
+        app: t.app,
+        title: t.title,
+        url: t.url,
+        pinned: Boolean(t.pinned),
+        unreadCount: t.unreadCount || 0,
+        isAudible: Boolean(t.isAudible),
+        isMuted: Boolean(t.isMuted)
+      })),
       active: state.active,
       apps: APPS
     });
+  }
+}
+
+function updateAppBadge() {
+  const totalUnread = state.tabs.reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+  if (app.setBadgeCount) {
+    app.setBadgeCount(totalUnread);
+  }
+  if (tray) {
+    tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} non lette)` : 'Google Suite');
   }
 }
 
@@ -149,11 +196,14 @@ function updateBounds() {
 }
 
 function createTabView(tab) {
+  const isLocalNewTab = tab.url.startsWith('file://');
+
   const view = new WebContentsView({
     webPreferences: {
+      preload: isLocalNewTab ? path.join(__dirname, 'preload.js') : undefined,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: !isLocalNewTab,
       spellcheck: true
     }
   });
@@ -179,19 +229,30 @@ function createTabView(tab) {
   // Track active URL and app
   view.webContents.on('did-navigate', (_event, url) => {
     tab.url = url;
-    const detected = detectApp(url);
-    if (detected && detected.id !== tab.app) {
-      tab.app = detected.id;
+    if (url.startsWith('file://')) {
+      tab.app = 'newtab';
+      tab.title = 'Nuova scheda';
+    } else {
+      const detected = detectApp(url);
+      if (detected && detected.id !== tab.app) {
+        tab.app = detected.id;
+      }
     }
     saveState();
     broadcastState();
   });
 
-  // Update tab title
+  // Update tab title and parse unread badges
   view.webContents.on('page-title-updated', (event, title) => {
     event.preventDefault();
     if (title) {
       tab.title = title;
+
+      // Extract unread message count from title (e.g. "Inbox (5) - user@gmail.com" or "(3) Google Chat")
+      const match = title.match(/\(([0-9]+)\)/);
+      tab.unreadCount = match ? parseInt(match[1], 10) : 0;
+      updateAppBadge();
+
       if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.setTitle(`${title} — Google Suite`);
       }
@@ -200,20 +261,45 @@ function createTabView(tab) {
     }
   });
 
+  // Audio indicators & mute detection
+  view.webContents.on('media-started-playing', () => {
+    tab.isAudible = true;
+    broadcastState();
+  });
+
+  view.webContents.on('media-paused', () => {
+    tab.isAudible = view.webContents.isCurrentlyAudible();
+    broadcastState();
+  });
+
   view.webContents.loadURL(tab.url);
   return view;
 }
 
-function createTab(url, appId = null, activate = true) {
-  const appDef = appId ? byId(appId) : (detectApp(url) || APPS[0]);
+function createTab(url = null, appId = null, activate = true, pinned = false) {
+  const isNewTab = !url && !appId;
+  const targetUrl = isNewTab ? NEW_TAB_URL : (url || (byId(appId) ? byId(appId).url : NEW_TAB_URL));
+  const appDef = appId ? byId(appId) : (detectApp(targetUrl) || null);
+
   const tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   const tab = {
     id: tabId,
-    app: appDef.id,
-    title: appDef.title,
-    url: url || appDef.url
+    app: isNewTab ? 'newtab' : (appDef ? appDef.id : 'web'),
+    title: isNewTab ? 'Nuova scheda' : (appDef ? appDef.title : 'Google'),
+    url: targetUrl,
+    pinned: Boolean(pinned),
+    unreadCount: 0,
+    isAudible: false,
+    isMuted: false,
+    lastAccessed: Date.now()
   };
-  state.tabs.push(tab);
+
+  if (pinned) {
+    const pinnedCount = state.tabs.filter((t) => t.pinned).length;
+    state.tabs.splice(pinnedCount, 0, tab);
+  } else {
+    state.tabs.push(tab);
+  }
 
   if (activate) {
     activateTab(tabId);
@@ -224,9 +310,52 @@ function createTab(url, appId = null, activate = true) {
   return tabId;
 }
 
+function openNewTab() {
+  return createTab(null, null, true, false);
+}
+
+function navigateCurrentTab(url, appId = null) {
+  if (!state.active) return;
+  const tab = state.tabs.find((t) => t.id === state.active);
+  if (!tab) return;
+
+  const appDef = appId ? byId(appId) : (detectApp(url) || null);
+  tab.url = url;
+  tab.app = appDef ? appDef.id : (tab.app !== 'newtab' ? tab.app : 'web');
+  tab.title = appDef ? appDef.title : 'Caricamento...';
+  tab.lastAccessed = Date.now();
+
+  let view = tabViews.get(tab.id);
+  if (view) {
+    // If transitioning from local newtab to remote Google app, recreate view for proper sandbox
+    if (view.webContents.getURL().startsWith('file://') && !url.startsWith('file://')) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.contentView.removeChildView(view); } catch (_) {}
+      }
+      try { view.webContents.close(); } catch (_) {}
+      tabViews.delete(tab.id);
+
+      view = createTabView(tab);
+      tabViews.set(tab.id, view);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.contentView.addChildView(view);
+      }
+      updateBounds();
+      view.webContents.focus();
+    } else {
+      view.webContents.loadURL(url);
+    }
+  }
+
+  saveState();
+  broadcastState();
+}
+
 function activateTab(tabId) {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
+
+  tab.lastAccessed = Date.now();
 
   const prevActiveId = state.active;
   if (prevActiveId && prevActiveId !== tabId && tabViews.has(prevActiveId)) {
@@ -283,9 +412,10 @@ function closeTab(tabId) {
   }
 
   state.tabs.splice(index, 1);
+  updateAppBadge();
 
   if (state.tabs.length === 0) {
-    createTab(APPS[0].url, APPS[0].id, true);
+    openNewTab();
     return;
   }
 
@@ -296,6 +426,37 @@ function closeTab(tabId) {
     saveState();
     broadcastState();
   }
+}
+
+function togglePinTab(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  tab.pinned = !tab.pinned;
+  const currentIdx = state.tabs.findIndex((t) => t.id === tabId);
+  const [moved] = state.tabs.splice(currentIdx, 1);
+
+  if (tab.pinned) {
+    const pinnedCount = state.tabs.filter((t) => t.pinned).length;
+    state.tabs.splice(pinnedCount, 0, moved);
+  } else {
+    const pinnedCount = state.tabs.filter((t) => t.pinned).length;
+    state.tabs.splice(pinnedCount, 0, moved);
+  }
+
+  saveState();
+  broadcastState();
+}
+
+function toggleMuteTab(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab || !tabViews.has(tabId)) return;
+
+  const view = tabViews.get(tabId);
+  const nextMuted = !view.webContents.isAudioMuted();
+  view.webContents.setAudioMuted(nextMuted);
+  tab.isMuted = nextMuted;
+  broadcastState();
 }
 
 function showAppMenu() {
@@ -313,10 +474,20 @@ function showTabMenu(tabId) {
 
   const template = [
     {
+      label: tab.pinned ? 'Separa scheda (Unpin)' : 'Fissa scheda (Pin)',
+      click: () => togglePinTab(tabId)
+    },
+    {
+      label: tab.isMuted ? 'Riattiva audio scheda' : 'Disattiva audio scheda',
+      enabled: Boolean(tab.isAudible || tab.isMuted),
+      click: () => toggleMuteTab(tabId)
+    },
+    { type: 'separator' },
+    {
       label: 'Apri nel browser predefinito',
       click: () => {
         shell.openExternal(tab.url);
-        closeTab(tabId);
+        if (!tab.pinned) closeTab(tabId);
       }
     },
     {
@@ -334,13 +505,14 @@ function showTabMenu(tabId) {
     { type: 'separator' },
     {
       label: 'Chiudi scheda',
+      enabled: !tab.pinned,
       click: () => closeTab(tabId)
     },
     {
       label: 'Chiudi le altre schede',
-      enabled: state.tabs.length > 1,
+      enabled: state.tabs.filter((t) => !t.pinned).length > 1,
       click: () => {
-        const toClose = state.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
+        const toClose = state.tabs.filter((t) => t.id !== tabId && !t.pinned).map((t) => t.id);
         toClose.forEach((id) => closeTab(id));
       }
     }
@@ -370,6 +542,15 @@ function showSettingsMenu() {
       checked: settings.start_minimized,
       click: (item) => {
         settings.start_minimized = item.checked;
+        saveSettings();
+      }
+    },
+    {
+      label: 'Risparmio memoria (sospendi schede inattive)',
+      type: 'checkbox',
+      checked: settings.memory_saver,
+      click: (item) => {
+        settings.memory_saver = item.checked;
         saveSettings();
       }
     },
@@ -428,32 +609,36 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Google Suite');
 
+  // Submenu with all 10 apps
+  const allAppsSubmenu = APPS.map((app) => ({
+    label: `${app.title} — ${app.description}`,
+    click: () => showAndSwitchTo(app.id)
+  }));
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Mostra / Nascondi Google Suite',
       click: toggleWindow
     },
+    {
+      label: 'Nuova scheda (Griglia app)...',
+      click: () => {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        openNewTab();
+      }
+    },
     { type: 'separator' },
     {
-      label: 'Gmail',
-      click: () => showAndSwitchTo('gmail')
+      label: 'Tutte le 10 Applicazioni',
+      submenu: allAppsSubmenu
     },
-    {
-      label: 'Calendar',
-      click: () => showAndSwitchTo('calendar')
-    },
-    {
-      label: 'Drive',
-      click: () => showAndSwitchTo('drive')
-    },
-    {
-      label: 'Meet',
-      click: () => showAndSwitchTo('meet')
-    },
-    {
-      label: 'Chat',
-      click: () => showAndSwitchTo('chat')
-    },
+    { type: 'separator' },
+    // Direct shortcuts to all 10 apps
+    ...APPS.map((app) => ({
+      label: app.title,
+      click: () => showAndSwitchTo(app.id)
+    })),
     { type: 'separator' },
     {
       label: 'Esci',
@@ -489,15 +674,59 @@ function handleArgv(argv) {
   }
 }
 
+// Background tab hibernation for memory saving (> 30 min inactive)
+setInterval(() => {
+  if (!settings.memory_saver) return;
+  const now = Date.now();
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+
+  state.tabs.forEach((tab) => {
+    if (
+      tab.id !== state.active &&
+      !tab.pinned &&
+      !tab.isAudible &&
+      tabViews.has(tab.id) &&
+      tab.lastAccessed &&
+      now - tab.lastAccessed > THIRTY_MINUTES
+    ) {
+      const view = tabViews.get(tab.id);
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.contentView.removeChildView(view);
+        }
+        view.webContents.close();
+      } catch (_) {}
+      tabViews.delete(tab.id);
+    }
+  });
+}, 5 * 60 * 1000);
+
 // IPC Handlers
 ipcMain.handle('get-state', () => ({
-  tabs: state.tabs.map((t) => ({ id: t.id, app: t.app, title: t.title, url: t.url })),
+  tabs: state.tabs.map((t) => ({
+    id: t.id,
+    app: t.app,
+    title: t.title,
+    url: t.url,
+    pinned: Boolean(t.pinned),
+    unreadCount: t.unreadCount || 0,
+    isAudible: Boolean(t.isAudible),
+    isMuted: Boolean(t.isMuted)
+  })),
   active: state.active,
   apps: APPS
 }));
 
+ipcMain.handle('get-apps', () => APPS);
+ipcMain.handle('open-new-tab', () => openNewTab());
+ipcMain.handle('navigate-current-tab', (_event, { url, appId }) =>
+  navigateCurrentTab(url, appId)
+);
 ipcMain.handle('activate-tab', (_event, id) => activateTab(id));
 ipcMain.handle('close-tab', (_event, id) => closeTab(id));
+ipcMain.handle('toggle-pin-tab', (_event, id) => togglePinTab(id));
+ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
+
 ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
   const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);
   const targetIndex = state.tabs.findIndex((t) => t.id === targetId);
@@ -511,6 +740,7 @@ ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
   saveState();
   broadcastState();
 });
+
 ipcMain.handle('move-tab-to-end', (_event, sourceId) => {
   const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);
   if (sourceIndex === -1) return;
@@ -520,6 +750,7 @@ ipcMain.handle('move-tab-to-end', (_event, sourceId) => {
   saveState();
   broadcastState();
 });
+
 ipcMain.handle('reload-active', () => {
   if (state.active && tabViews.has(state.active)) {
     tabViews.get(state.active).webContents.reload();
@@ -541,6 +772,15 @@ app.on('second-instance', (_event, commandLine) => {
 app.whenReady().then(() => {
   loadSettings();
   loadState();
+
+  // Register Global System Hotkey (Ctrl+Alt+G) to toggle Google Suite from anywhere on Linux
+  try {
+    globalShortcut.register('CommandOrControl+Alt+G', () => {
+      toggleWindow();
+    });
+  } catch (err) {
+    console.warn('Could not register global hotkey:', err);
+  }
 
   // Strip Electron identifier from User-Agent so Google accounts & services don't block login
   const defaultUa = session.defaultSession.getUserAgent();
@@ -640,6 +880,10 @@ app.on('activate', () => {
     mainWindow.show();
     mainWindow.focus();
   }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('before-quit', () => {

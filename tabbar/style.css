@@ -8,6 +8,8 @@
   --fg-dim: #9aa0a6;
   --accent: #8ab4f8;
   --border: #17181a;
+  --badge-bg: #ea4335;
+  --badge-fg: #ffffff;
 }
 
 * {
@@ -61,6 +63,16 @@ html, body {
   cursor: pointer;
   transition: background 0.12s ease, opacity 0.15s ease, box-shadow 0.1s ease;
   user-select: none;
+  position: relative;
+}
+
+.tab:hover {
+  background: var(--bg-tab-hover);
+}
+
+.tab.active {
+  background: var(--bg-active);
+  border-bottom: 2px solid var(--accent);
 }
 
 .tab.dragging {
@@ -76,25 +88,27 @@ html, body {
   box-shadow: inset -3px 0 0 0 var(--accent);
 }
 
-.tab .dot,
-.tab .title {
-  pointer-events: none;
+/* Pinned tabs */
+.tab.pinned {
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+  justify-content: center;
 }
 
-.tab:hover {
-  background: var(--bg-tab-hover);
+.tab.pinned .title,
+.tab.pinned .x {
+  display: none;
 }
 
-.tab.active {
-  background: var(--bg-active);
-  border-bottom: 2px solid var(--accent);
-}
-
-.tab .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
+.tab .tab-icon {
+  width: 16px;
+  height: 16px;
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .tab .title {
@@ -104,6 +118,48 @@ html, body {
   white-space: nowrap;
   font-size: 12px;
   font-weight: 500;
+  pointer-events: none;
+}
+
+/* Unread Badge */
+.tab .badge {
+  background-color: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 10px;
+  flex: none;
+  pointer-events: none;
+}
+
+.tab.pinned .badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 8px;
+  padding: 1px 3px;
+}
+
+/* Audio button */
+.tab .audio-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.tab .audio-btn:hover {
+  color: #fff;
+  background: none;
 }
 
 .tab .x {
@@ -118,6 +174,7 @@ html, body {
   align-items: center;
   justify-content: center;
   line-height: 1;
+  flex: none;
 }
 
 .tab .x:hover {
