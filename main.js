@@ -59,32 +59,71 @@ let settings = {
 // Map of tabId -> WebContentsView
 const tabViews = new Map();
 
-function ensureAppIcons() {
+// Generate distinct, crisp 128x128 PNG icons for all Google apps from SVG vectors
+async function ensureAppIcons() {
   try {
     fs.mkdirSync(ICONS_DIR, { recursive: true });
     const { ICONS } = require('./svg-icons');
+
+    const keysToGenerate = [];
     for (const [key, svg] of Object.entries(ICONS)) {
+      if (['audio', 'muted', 'pin', 'newtab'].includes(key)) continue;
       const pngPath = path.join(ICONS_DIR, `${key}.png`);
-      if (!fs.existsSync(pngPath)) {
-        const svg128 = svg
-          .replace(/width="[^"]*"/, 'width="128"')
-          .replace(/height="[^"]*"/, 'height="128"');
-        const img = nativeImage.createFromBuffer(Buffer.from(svg128));
-        if (!img.isEmpty()) {
-          fs.writeFileSync(pngPath, img.toPNG());
-        } else if (fs.existsSync(ICON_PATH)) {
-          fs.copyFileSync(ICON_PATH, pngPath);
-        }
+      if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 1080) {
+        keysToGenerate.push(key);
       }
     }
+
+    if (keysToGenerate.length === 0) return;
+
+    // Use an offscreen BrowserWindow to render real SVG vectors into 128x128 PNGs
+    const offscreenWin = new BrowserWindow({
+      show: false,
+      width: 128,
+      height: 128,
+      frame: false,
+      transparent: true,
+      webPreferences: {
+        offscreen: true,
+        contextIsolation: true
+      }
+    });
+
+    for (const key of keysToGenerate) {
+      const svg = ICONS[key];
+      if (!svg) continue;
+      const pngPath = path.join(ICONS_DIR, `${key}.png`);
+
+      const cleanSvg = svg
+        .replace(/width="[^"]*"/, 'width="128"')
+        .replace(/height="[^"]*"/, 'height="128"');
+
+      const html = `<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;width:128px;height:128px;overflow:hidden;background:transparent;display:flex;align-items:center;justify-content:center;}</style></head><body>${cleanSvg}</body></html>`;
+
+      try {
+        await offscreenWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        await new Promise((r) => setTimeout(r, 60));
+        const image = await offscreenWin.webContents.capturePage();
+        const pngBuffer = image.toPNG();
+        if (pngBuffer && pngBuffer.length > 200) {
+          fs.writeFileSync(pngPath, pngBuffer);
+        }
+      } catch (e) {
+        console.error(`Failed to rasterize SVG for ${key}:`, e);
+      }
+    }
+
+    try { offscreenWin.destroy(); } catch (_) {}
   } catch (err) {
-    console.error('Failed to generate app PNG icons:', err);
+    console.error('Failed to generate app PNG icons via offscreen window:', err);
   }
 }
 
 function getAppIconPath(appId) {
   const p = path.join(ICONS_DIR, `${appId}.png`);
-  if (fs.existsSync(p)) return p;
+  if (fs.existsSync(p) && fs.statSync(p).size > 1080) {
+    return p;
+  }
   return ICON_PATH;
 }
 
@@ -384,6 +423,11 @@ function createTab(url = null, appId = null, activate = true, pinned = false) {
   if (activate) {
     activateTab(tabId);
   } else {
+    // If not activating, create background view so notifications work
+    try {
+      const view = createTabView(tab);
+      tabViews.set(tabId, view);
+    } catch (_) {}
     saveState();
     broadcastState();
   }
@@ -447,7 +491,7 @@ function activateTab(tabId) {
     }
   }
 
-  // Lazy instantiate tab view
+  // Lazy instantiate tab view if not yet loaded in background
   let view = tabViews.get(tabId);
   if (!view) {
     view = createTabView(tab);
@@ -636,11 +680,21 @@ function showSettingsMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Test notifica desktop...',
+      label: 'Test notifica Google Chat...',
       click: () => {
         showCustomNotification({
-          title: 'Notifica di test',
-          body: 'Le notifiche popup di Google Suite funzionano perfettamente!',
+          title: 'Mario Rossi',
+          body: 'Ciao! Questa è una notifica di prova con la vera icona di Google Chat.',
+          appId: 'chat'
+        });
+      }
+    },
+    {
+      label: 'Test notifica Gmail...',
+      click: () => {
+        showCustomNotification({
+          title: 'Google Suite Team',
+          body: 'Notifica di prova Gmail con l\'icona ufficiale rossa.',
           appId: 'gmail'
         });
       }
@@ -699,7 +753,7 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Google Suite');
 
-  // Submenu with all 10 apps
+  // Submenu with all 11 apps
   const allAppsSubmenu = APPS.map((app) => ({
     label: `${app.title} — ${app.description}`,
     click: () => showAndSwitchTo(app.id)
@@ -720,7 +774,7 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Tutte le 10 Applicazioni',
+      label: 'Tutte le Applicazioni',
       submenu: allAppsSubmenu
     },
     { type: 'separator' },
@@ -764,16 +818,19 @@ function handleArgv(argv) {
 }
 
 // Background tab hibernation for memory saving (> 30 min inactive)
+// Note: Communication apps (Gmail, Chat, Calendar, Meet) and pinned tabs are NEVER hibernated!
 setInterval(() => {
   if (!settings.memory_saver) return;
   const now = Date.now();
   const THIRTY_MINUTES = 30 * 60 * 1000;
+  const NEVER_HIBERNATE = ['gmail', 'chat', 'calendar', 'meet'];
 
   state.tabs.forEach((tab) => {
     if (
       tab.id !== state.active &&
       !tab.pinned &&
       !tab.isAudible &&
+      !NEVER_HIBERNATE.includes(tab.app) &&
       tabViews.has(tab.id) &&
       tab.lastAccessed &&
       now - tab.lastAccessed > THIRTY_MINUTES
@@ -859,8 +916,24 @@ ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
     }
   }
 
-  const detected = detectApp(event.sender.getURL());
-  const appId = senderTab ? senderTab.app : (detected ? detected.id : 'gmail');
+  let appId = senderTab ? senderTab.app : null;
+  if (!appId) {
+    const url = event.sender.getURL();
+    if (url.includes('chat.google.com') || url.includes('mail.google.com/chat')) {
+      appId = 'chat';
+    } else if (url.includes('mail.google.com')) {
+      appId = 'gmail';
+    } else if (url.includes('calendar.google.com')) {
+      appId = 'calendar';
+    } else if (url.includes('meet.google.com')) {
+      appId = 'meet';
+    } else if (url.includes('gemini.google.com')) {
+      appId = 'gemini';
+    } else {
+      const detected = detectApp(url);
+      appId = detected ? detected.id : 'gmail';
+    }
+  }
 
   showCustomNotification({
     title,
@@ -881,11 +954,13 @@ app.on('second-instance', (_event, commandLine) => {
   handleArgv(commandLine.slice(1));
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setAppUserModelId('gapps');
-  ensureAppIcons();
   loadSettings();
   loadState();
+
+  // Generate crisp 128x128 PNG app icons from SVG vectors for desktop notifications
+  await ensureAppIcons();
 
   // Register Global System Hotkey (Ctrl+Alt+G) to toggle Google Suite from anywhere on Linux
   try {
@@ -968,10 +1043,25 @@ app.whenReady().then(() => {
   tabbarView.webContents.loadFile(path.join(__dirname, 'tabbar', 'index.html'));
   mainWindow.contentView.addChildView(tabbarView);
 
-  // Attach active tab
+  // Attach active tab immediately for instant startup
   if (state.active) {
     activateTab(state.active);
   }
+
+  // Preload all background tabs (Chat, Gmail, Calendar, etc.) so real-time notifications
+  // and WebSockets are connected immediately at launch without needing manual clicks!
+  setTimeout(() => {
+    state.tabs.forEach((tab) => {
+      if (tab.id !== state.active && !tabViews.has(tab.id) && !tab.url.startsWith('file://')) {
+        try {
+          const view = createTabView(tab);
+          tabViews.set(tab.id, view);
+        } catch (err) {
+          console.error(`Failed to preload background tab ${tab.app}:`, err);
+        }
+      }
+    });
+  }, 1000);
 
   updateBounds();
   mainWindow.on('resize', updateBounds);
