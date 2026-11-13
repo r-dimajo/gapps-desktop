@@ -65,10 +65,15 @@ function render(state) {
       document.querySelectorAll(".tab").forEach((t) => t.classList.remove("dragging"));
     });
 
-    // App SVG Icon
+    // App SVG Icon (switches to badged icon with red dot if there are unread notifications)
     const iconContainer = document.createElement("div");
     iconContainer.className = "tab-icon";
-    const iconSvg = (typeof ICONS !== "undefined" && ICONS[tab.app]) || (typeof ICONS !== "undefined" && ICONS.newtab) || "";
+    const hasUnread = Boolean(tab.unreadCount && tab.unreadCount > 0);
+    const iconKey = hasUnread && typeof ICONS !== "undefined" && ICONS[tab.app + "_badged"]
+      ? tab.app + "_badged"
+      : tab.app;
+    const iconSvg =
+      (typeof ICONS !== "undefined" && (ICONS[iconKey] || ICONS[tab.app] || ICONS.newtab)) || "";
     iconContainer.innerHTML = iconSvg;
     el.appendChild(iconContainer);
 

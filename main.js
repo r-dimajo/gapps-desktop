@@ -127,6 +127,14 @@ function getAppIconPath(appId) {
   return ICON_PATH;
 }
 
+function getTrayBadgedIconPath() {
+  const p = path.join(ICONS_DIR, 'tray_badged.png');
+  if (fs.existsSync(p) && fs.statSync(p).size > 1080) {
+    return p;
+  }
+  return ICON_PATH;
+}
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -243,6 +251,10 @@ function updateAppBadge() {
   }
   if (tray) {
     tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} non lette)` : 'Google Suite');
+    const trayIconPath = totalUnread > 0 ? getTrayBadgedIconPath() : ICON_PATH;
+    try {
+      tray.setImage(nativeImage.createFromPath(trayIconPath));
+    } catch (_) {}
   }
 }
 
