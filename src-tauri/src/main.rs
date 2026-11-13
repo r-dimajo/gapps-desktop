@@ -1,7 +1,10 @@
-use ksni::Tray;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+mod apps;
+mod tray;
 
-const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+use apps::AppDef;
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 // snap terminals export GIO_MODULE_DIR into their sandbox cache; without the
 // GnuTLS module there, webkit loads no TLS backend ("TLS support is not
@@ -15,102 +18,120 @@ fn fix_tls_module_dir() {
     }
 }
 
-struct TrayIcon(tauri::AppHandle);
+// most recently focused app window, used by the tray left-click toggle
+pub static LAST_WINDOW: Mutex<Option<String>> = Mutex::new(None);
 
-impl TrayIcon {
-    fn show_window(&mut self) {
-        if let Some(w) = self.0.get_webview_window("gmail") {
+pub fn open(app: &AppHandle, def: &'static AppDef, url: Option<tauri::Url>) {
+    if let Some(w) = app.get_webview_window(def.id) {
+        w.show().ok();
+        w.set_focus().ok();
+        return;
+    }
+    let target = url.unwrap_or_else(|| def.url.parse().unwrap());
+    if let Err(e) = WebviewWindowBuilder::new(app, def.id, WebviewUrl::External(target))
+        .title(def.title)
+        .inner_size(1200.0, 800.0)
+        .build()
+    {
+        eprintln!("open {} failed: {e}", def.id);
+    }
+}
+
+pub fn open_app(app: &AppHandle, def: &'static AppDef) {
+    open(app, def, None);
+}
+
+pub fn toggle_window(app: &AppHandle, id: &str) {
+    if let Some(w) = app.get_webview_window(id) {
+        if w.is_visible().unwrap_or(false) {
+            w.hide().ok();
+        } else {
             w.show().ok();
             w.set_focus().ok();
         }
     }
-    fn toggle(&mut self) {
-        if let Some(w) = self.0.get_webview_window("gmail") {
-            if w.is_visible().unwrap_or(false) {
-                w.hide().ok();
-            } else {
-                self.show_window();
-            }
-        }
-    }
 }
 
-impl ksni::Tray for TrayIcon {
-    fn id(&self) -> String {
-        "com.dimric.gapps".into()
+// route an argv value (desktop handler / manual) to the right app window
+pub fn launch_arg(app: &AppHandle, arg: &str) {
+    let lower = arg.to_ascii_lowercase();
+    if let Some(def) = apps::by_id(&lower) {
+        open_app(app, def);
+        return;
     }
-    fn title(&self) -> String {
-        "gapps".into()
+    if lower.starts_with("mailto:") {
+        // compose window prefilled from the mailto target
+        let url = tauri::Url::parse_with_params(
+            "https://mail.google.com/mail/",
+            &[
+                ("view", "cm"),
+                ("fs", "1"),
+                ("tf", "1"),
+                ("extsrc", "mailto"),
+                ("url", arg),
+            ],
+        )
+        .unwrap();
+        open(app, apps::by_id("gmail").unwrap(), Some(url));
+        return;
     }
-    // pixmap instead of icon-name: works before any icon theme install
-    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        let img = image::load_from_memory(ICON_PNG).unwrap().to_rgba8();
-        let (w, h) = (img.width() as i32, img.height() as i32);
-        let mut argb = Vec::with_capacity((w * h * 4) as usize);
-        // SNI wants ARGB32
-        for p in img.pixels() {
-            argb.extend_from_slice(&[p[3], p[0], p[1], p[2]]);
+    if lower.starts_with("webcal:") {
+        let rest = arg
+            .strip_prefix("webcal://")
+            .unwrap_or(&arg["webcal:".len()..]);
+        let url = tauri::Url::parse_with_params(
+            "https://calendar.google.com/calendar/r",
+            &[("cid", rest)],
+        )
+        .unwrap();
+        open(app, apps::by_id("calendar").unwrap(), Some(url));
+        return;
+    }
+    if let Ok(u) = tauri::Url::parse(arg) {
+        if let Some(host) = u.host_str() {
+            if let Some(def) = apps::by_host(host) {
+                open(app, def, Some(u));
+            }
         }
-        vec![ksni::Icon { width: w, height: h, data: argb }]
-    }
-    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::*;
-        vec![
-            StandardItem {
-                label: "Show".into(),
-                activate: Box::new(|t: &mut Self| t.show_window()),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Quit".into(),
-                activate: Box::new(|t: &mut Self| t.0.exit(0)),
-                ..Default::default()
-            }
-            .into(),
-        ]
-    }
-    // left click on Plasma = activate
-    fn activate(&mut self, _x: i32, _y: i32) {
-        self.toggle();
-    }
-    fn secondary_activate(&mut self, _x: i32, _y: i32) {
-        self.show_window();
     }
 }
 
 fn main() {
     fix_tls_module_dir();
+    let args: Vec<String> = std::env::args().skip(1).collect();
     tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
-            let url: tauri::Url = "https://mail.google.com".parse()?;
-            WebviewWindowBuilder::new(app, "gmail", WebviewUrl::External(url))
-                .title("Gmail")
-                .inner_size(1200.0, 800.0)
-                .build()?;
-
-            use ksni::blocking::TrayMethods;
-            if let Err(e) = TrayIcon(app.handle().clone()).spawn() {
-                eprintln!("tray error: {e}");
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for a in argv.iter().skip(1) {
+                launch_arg(app, a);
             }
-
-            // spike: prove the notification path works
-            use tauri_plugin_notification::NotificationExt;
-            app.notification()
-                .builder()
-                .title("gapps")
-                .body("Notifications work")
-                .show()?;
-
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None::<Vec<&str>>,
+        ))
+        .plugin(tauri_plugin_notification::init())
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            let target = args.iter().find(|a| !a.starts_with('-'));
+            match target {
+                Some(arg) => launch_arg(&handle, arg),
+                None => open_app(&handle, apps::by_id("gmail").unwrap()),
+            }
+            tray::spawn(handle)?;
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 // close-to-tray: hide instead of quit
                 api.prevent_close();
                 window.hide().ok();
             }
+            tauri::WindowEvent::Focused(true) => {
+                if apps::by_id(window.label()).is_some() {
+                    *LAST_WINDOW.lock().unwrap() = Some(window.label().to_string());
+                }
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error running gapps");

@@ -10,6 +10,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
 ksni = { version = "0.3", features = ["blocking"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
