@@ -1198,6 +1198,7 @@ dependencies = [
 name = "gapps"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "image",
  "ksni",
  "serde",
