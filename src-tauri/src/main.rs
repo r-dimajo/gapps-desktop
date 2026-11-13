@@ -6,7 +6,7 @@ pub use apps::{by_id, APPS, AppDef};
 use state::TabsState;
 use tauri::{
     menu::{CheckMenuItemBuilder, ContextMenu, MenuBuilder, MenuItemBuilder},
-    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalSize,
     WebviewBuilder, WebviewUrl, WindowEvent,
 };
 use tauri::webview::NewWindowResponse;
@@ -57,9 +57,9 @@ fn open_external(url: &tauri::Url) {
 #[cfg(target_os = "linux")]
 pub fn apply_gtk_layout(window: &tauri::Window) {
     use gtk::prelude::*;
-    let window = window.clone();
+    let w = window.clone();
     let _ = window.run_on_main_thread(move || {
-        let Ok(vbox) = window.default_vbox() else { return };
+        let Ok(vbox) = w.default_vbox() else { return };
         let children = vbox.children();
         if let Some(tabbar) = children.first() {
             vbox.set_child_packing(tabbar, false, false, 0, gtk::PackType::Start);
@@ -684,13 +684,15 @@ fn main() {
             } else if id_str == "toggle_startup" {
                 let current = {
                     let st = app.state::<TabsState>();
-                    st.0.lock().unwrap().settings.open_at_startup
+                    let guard = st.0.lock().unwrap();
+                    guard.settings.open_at_startup
                 };
                 set_settings(app.clone(), Some(!current), None);
             } else if id_str == "toggle_minimized" {
                 let current = {
                     let st = app.state::<TabsState>();
-                    st.0.lock().unwrap().settings.start_minimized
+                    let guard = st.0.lock().unwrap();
+                    guard.settings.start_minimized
                 };
                 set_settings(app.clone(), None, Some(!current));
             } else if id_str == "clear_cache" {
