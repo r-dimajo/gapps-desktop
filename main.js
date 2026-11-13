@@ -15,6 +15,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { APPS, byId, byHost, detectApp, isInternal } = require('./apps');
 
 // Linux Wayland, sandbox, and WebRTC PipeWire hardware flags
@@ -65,12 +66,23 @@ async function ensureAppIcons() {
     fs.mkdirSync(ICONS_DIR, { recursive: true });
     const { ICONS } = require('./svg-icons');
 
+    const metaPath = path.join(ICONS_DIR, '.meta.json');
+    let meta = {};
+    try {
+      if (fs.existsSync(metaPath)) {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      }
+    } catch (_) {}
+
+    const newMeta = { ...meta };
     const keysToGenerate = [];
+
     for (const [key, svg] of Object.entries(ICONS)) {
       if (['audio', 'muted', 'pin', 'newtab'].includes(key)) continue;
       const pngPath = path.join(ICONS_DIR, `${key}.png`);
-      if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 1080) {
-        keysToGenerate.push(key);
+      const hash = crypto.createHash('md5').update(svg).digest('hex');
+      if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 200 || meta[key] !== hash) {
+        keysToGenerate.push({ key, hash });
       }
     }
 
@@ -89,7 +101,7 @@ async function ensureAppIcons() {
       }
     });
 
-    for (const key of keysToGenerate) {
+    for (const { key, hash } of keysToGenerate) {
       const svg = ICONS[key];
       if (!svg) continue;
       const pngPath = path.join(ICONS_DIR, `${key}.png`);
@@ -102,16 +114,21 @@ async function ensureAppIcons() {
 
       try {
         await offscreenWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-        await new Promise((r) => setTimeout(r, 60));
+        await new Promise((r) => setTimeout(r, 70));
         const image = await offscreenWin.webContents.capturePage();
         const pngBuffer = image.toPNG();
         if (pngBuffer && pngBuffer.length > 200) {
           fs.writeFileSync(pngPath, pngBuffer);
+          newMeta[key] = hash;
         }
       } catch (e) {
         console.error(`Failed to rasterize SVG for ${key}:`, e);
       }
     }
+
+    try {
+      fs.writeFileSync(metaPath, JSON.stringify(newMeta, null, 2));
+    } catch (_) {}
 
     try { offscreenWin.destroy(); } catch (_) {}
   } catch (err) {
@@ -119,9 +136,23 @@ async function ensureAppIcons() {
   }
 }
 
-function getAppIconPath(appId) {
+function getAppIconPath(appId, badged = false) {
+  if (badged) {
+    const badgedPath = path.join(ICONS_DIR, `${appId}_badged.png`);
+    if (fs.existsSync(badgedPath) && fs.statSync(badgedPath).size > 200) {
+      return badgedPath;
+    }
+  }
   const p = path.join(ICONS_DIR, `${appId}.png`);
-  if (fs.existsSync(p) && fs.statSync(p).size > 1080) {
+  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
+    return p;
+  }
+  return ICON_PATH;
+}
+
+function getTrayIconPath() {
+  const p = path.join(ICONS_DIR, 'tray.png');
+  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
     return p;
   }
   return ICON_PATH;
@@ -129,10 +160,10 @@ function getAppIconPath(appId) {
 
 function getTrayBadgedIconPath() {
   const p = path.join(ICONS_DIR, 'tray_badged.png');
-  if (fs.existsSync(p) && fs.statSync(p).size > 1080) {
+  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
     return p;
   }
-  return ICON_PATH;
+  return getTrayIconPath();
 }
 
 function loadSettings() {
@@ -251,7 +282,7 @@ function updateAppBadge() {
   }
   if (tray) {
     tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} non lette)` : 'Google Suite');
-    const trayIconPath = totalUnread > 0 ? getTrayBadgedIconPath() : ICON_PATH;
+    const trayIconPath = totalUnread > 0 ? getTrayBadgedIconPath() : getTrayIconPath();
     try {
       tray.setImage(nativeImage.createFromPath(trayIconPath));
     } catch (_) {}
@@ -282,7 +313,16 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
 
   const appDef = byId(appId);
   const appName = appDef ? appDef.title : 'Google Suite';
-  const iconPath = getAppIconPath(appId);
+
+  // Prefer badged icon (with notification red dot) when notifying, or clean app icon
+  const iconPath = getAppIconPath(appId, true);
+  let notifIcon = iconPath;
+  try {
+    const img = nativeImage.createFromPath(iconPath);
+    if (!img.isEmpty()) {
+      notifIcon = img;
+    }
+  } catch (_) {}
 
   // Format custom title & branding per app
   let displayTitle = title || appName;
@@ -303,7 +343,7 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
   const notification = new Notification({
     title: displayTitle,
     body: body || '',
-    icon: iconPath,
+    icon: notifIcon,
     urgency: appId === 'chat' || appId === 'meet' ? 'critical' : 'normal',
     silent: false
   });
@@ -712,6 +752,16 @@ function showSettingsMenu() {
       }
     },
     {
+      label: 'Test notifica Google Gemini...',
+      click: () => {
+        showCustomNotification({
+          title: 'Google Gemini',
+          body: 'Notifica di prova con l\'icona ufficiale a stella di Gemini.',
+          appId: 'gemini'
+        });
+      }
+    },
+    {
       label: 'Cancella cache...',
       click: async () => {
         await session.defaultSession.clearCache();
@@ -761,7 +811,7 @@ function showAndSwitchTo(appId) {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(ICON_PATH);
+  const icon = nativeImage.createFromPath(getTrayIconPath());
   tray = new Tray(icon);
   tray.setToolTip('Google Suite');
 

@@ -25,9 +25,12 @@ google-suite-linux/
 │   ├── index.html          ← Google Workspace dashboard with search & app cards
 │   ├── style.css           ← Dark responsive grid layout with hover animations
 │   └── renderer.js         ← Card click navigation, search bar, shortcuts (1-9)
-├── icons/
-│   └── icon.png            ← 128px application & tray icon
-└── src-tauri/              ← Legacy Rust prototype (preserved for reference)
+├── tab-preload.js          ← Intercepts and formats desktop notifications per app
+├── tools/
+│   └── update_icons.py     ← Utility generating badged icons and svg-icons.js
+└── icons/
+    ├── icon.png            ← 128px application icon
+    └── official/           ← Official vector SVGs for all 11 apps
 ```
 
 ---

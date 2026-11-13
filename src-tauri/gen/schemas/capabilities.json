@@ -1,1 +1,0 @@
-{"main-capability":{"identifier":"main-capability","description":"tab strip UI IPC","local":true,"windows":["tabbar"],"permissions":["core:default","core:window:allow-start-dragging"]}}
