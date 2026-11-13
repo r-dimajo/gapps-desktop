@@ -6,15 +6,28 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-// snap terminals export GIO_MODULE_DIR into their sandbox cache; without the
-// GnuTLS module there, webkit loads no TLS backend ("TLS support is not
-// available"). Reset to the system module dir unless the current one has TLS.
-fn fix_tls_module_dir() {
-    let ok = std::env::var_os("GIO_MODULE_DIR")
-        .map(|d| std::path::Path::new(&d).join("libgiognutls.so").exists())
-        .unwrap_or(true);
-    if !ok {
+// snap terminals export sandbox env (GIO_MODULE_DIR, GST_*) into their host
+// shell; webkit then loads no TLS/GStreamer elements ("TLS support is not
+// available", "appsink not found"). Drop vars pointing at a snap sandbox
+// unless they actually contain what the system needs.
+fn fix_snap_env() {
+    let drop_tls = std::env::var_os("GIO_MODULE_DIR")
+        .map(|d| !std::path::Path::new(&d).join("libgiognutls.so").exists())
+        .unwrap_or(false);
+    if drop_tls {
         std::env::remove_var("GIO_MODULE_DIR");
+    }
+    let drop_gst = std::env::var_os("GST_PLUGIN_SYSTEM_PATH")
+        .map(|d| {
+            !std::path::Path::new(&d)
+                .join("libgstcoreelements.so")
+                .exists()
+        })
+        .unwrap_or(false);
+    if drop_gst {
+        std::env::remove_var("GST_PLUGIN_SYSTEM_PATH");
+        std::env::remove_var("GST_PLUGIN_PATH");
+        std::env::remove_var("GST_PLUGIN_SCANNER");
     }
 }
 
@@ -97,7 +110,7 @@ pub fn launch_arg(app: &AppHandle, arg: &str) {
 }
 
 fn main() {
-    fix_tls_module_dir();
+    fix_snap_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
