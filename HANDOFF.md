@@ -27,7 +27,8 @@ google-suite-linux/
 │   └── renderer.js         ← Card click navigation, search bar, shortcuts (1-9)
 ├── tab-preload.js          ← Intercepts and formats desktop notifications per app
 ├── tools/
-│   └── update_icons.py     ← Utility generating badged icons and svg-icons.js
+│   ├── update_icons.py     ← Utility generating badged icons and svg-icons.js
+│   └── install_desktop.sh  ← Installs KDE .desktop entries and hicolor icons
 └── icons/
     ├── icon.png            ← 128px application icon
     └── official/           ← Official vector SVGs for all 11 apps

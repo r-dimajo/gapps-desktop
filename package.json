@@ -4,7 +4,8 @@
   "description": "Google Suite desktop shell for Linux",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --no-sandbox"
+    "start": "electron . --no-sandbox",
+    "install-desktop": "bash tools/install_desktop.sh"
   },
   "devDependencies": {
     "electron": "^33.2.1"

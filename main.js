@@ -166,6 +166,58 @@ function getTrayBadgedIconPath() {
   return getTrayIconPath();
 }
 
+function ensureDesktopFile() {
+  if (process.platform !== 'linux') return;
+  try {
+    const home = process.env.HOME || app.getPath('home');
+    const appsDir = path.join(home, '.local', 'share', 'applications');
+    const iconsDir = path.join(home, '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
+    const targetIconPath = path.join(iconsDir, 'gapps.png');
+    const targetIconPathSuite = path.join(iconsDir, 'google-suite.png');
+    const sourceIcon = path.resolve(ICON_PATH);
+
+    // 1. Install hicolor icon for both gapps and google-suite
+    try {
+      if (!fs.existsSync(iconsDir)) {
+        fs.mkdirSync(iconsDir, { recursive: true });
+      }
+      fs.copyFileSync(sourceIcon, targetIconPath);
+      fs.copyFileSync(sourceIcon, targetIconPathSuite);
+    } catch (_) {}
+
+    // 2. Install .desktop file for both gapps.desktop and google-suite.desktop
+    if (!fs.existsSync(appsDir)) {
+      fs.mkdirSync(appsDir, { recursive: true });
+    }
+
+    const desktopContent = `[Desktop Entry]
+Name=Google Suite
+Comment=Google Suite desktop shell for Linux
+Exec=npm start --prefix ${path.resolve(__dirname)}
+Icon=${sourceIcon}
+Terminal=false
+Type=Application
+StartupWMClass=gapps
+StartupNotify=true
+Categories=Network;Office;Chat;
+`;
+
+    const gappsDesktop = path.join(appsDir, 'gapps.desktop');
+    const suiteDesktop = path.join(appsDir, 'google-suite.desktop');
+
+    fs.writeFileSync(gappsDesktop, desktopContent, 'utf8');
+    fs.writeFileSync(suiteDesktop, desktopContent.replace('StartupWMClass=gapps', 'StartupWMClass=google-suite'), 'utf8');
+
+    // 3. Notify desktop environment / KDE Sycoca
+    try {
+      const { exec } = require('child_process');
+      exec('update-desktop-database ~/.local/share/applications/ 2>/dev/null; kbuildsycoca6 --noincremental 2>/dev/null || kbuildsycoca5 --noincremental 2>/dev/null');
+    } catch (_) {}
+  } catch (err) {
+    console.warn('Could not ensure desktop integration:', err);
+  }
+}
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -277,10 +329,10 @@ function broadcastState() {
 }
 
 function updateAppBadge() {
-  const totalUnread = state.tabs.reduce(
-    (sum, t) => sum + (t.unreadCount || 0) + (t.hasNotification ? 1 : 0),
-    0
-  );
+  const totalUnread = state.tabs.reduce((sum, t) => {
+    const unread = Math.max(t.unreadCount || 0, t.hasNotification ? 1 : 0);
+    return sum + unread;
+  }, 0);
   if (app.setBadgeCount) {
     app.setBadgeCount(totalUnread);
   }
@@ -1086,7 +1138,12 @@ app.on('second-instance', (_event, commandLine) => {
 });
 
 app.whenReady().then(async () => {
+  app.setName('Google Suite');
+  if (app.setDesktopName) {
+    app.setDesktopName('gapps.desktop');
+  }
   app.setAppUserModelId('gapps');
+  ensureDesktopFile();
   loadSettings();
   loadState();
 
@@ -1158,6 +1215,9 @@ app.whenReady().then(async () => {
     backgroundColor: '#202124',
     show: false
   });
+  try {
+    mainWindow.setIcon(appWindowIcon);
+  } catch (_) {}
 
   // Create permanent 36px tab bar view at top
   tabbarView = new WebContentsView({
