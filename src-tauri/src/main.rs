@@ -257,36 +257,41 @@ fn boot_webviews(app: &AppHandle) {
             guard.active,
         )
     };
-    if tabs.is_empty() {
-        let _ = add_tab(
-            app,
-            apps::by_id("gmail").unwrap().url.parse().unwrap(),
-            "gmail",
-            true,
-        );
-    } else {
-        for (id, url, app_id) in &tabs {
-            let parsed: tauri::Url = url.parse().unwrap_or_else(|_| {
-                apps::by_id("gmail").unwrap().url.parse().unwrap()
-            });
-            let _ = create_webview(
-                app,
-                *id,
-                parsed,
-                apps::by_id(app_id).map(|d| d.id).unwrap_or("custom"),
+
+    // Stagger webview creation: spawning many WebKitWebProcesses at once on
+    // this driver (NVIDIA/Wayland) leaves them blank. One per ~300ms is fine.
+    let mut ordered: Vec<(u64, String, String)> = tabs.iter().cloned().collect();
+    if let Some(p) = ordered.iter().position(|(id, _, _)| *id == active) {
+        let a = ordered.remove(p);
+        ordered.insert(0, a);
+    }
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        if ordered.is_empty() {
+            let _ = add_tab(
+                &app2,
+                apps::by_id("gmail").unwrap().url.parse().unwrap(),
+                "gmail",
                 true,
             );
         }
-        if active != 0 {
-            let _ = activate_tab_impl(app, active);
+        for (n, (id, url, app_id)) in ordered.into_iter().enumerate() {
+            let parsed: tauri::Url = url.parse().unwrap_or_else(|_| {
+                apps::by_id("gmail").unwrap().url.parse().unwrap()
+            });
+            let app_id = apps::by_id(&app_id).map(|d| d.id).unwrap_or("custom");
+            let _ = create_webview(&app2, id, parsed, app_id, true);
+            if n == 0 {
+                let _ = activate_tab_impl(&app2, id);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
         }
-    }
-
-    if let Some(args) = PENDING_ARGS.get() {
-        for a in args {
-            launch_arg(app, a);
+        if let Some(args) = PENDING_ARGS.get() {
+            for a in args {
+                launch_arg(&app2, a);
+            }
         }
-    }
+    });
     relayout(app);
 }
 
@@ -593,7 +598,13 @@ fn main() {
                     && size.width > 0
                     && size.height > 0
                 {
-                    boot_webviews(window.app_handle());
+                    // boot off the event-loop thread: creating remote webviews
+                    // inline during event dispatch renders blank on webkitgtk
+                    let app = window.app_handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                        boot_webviews(&app);
+                    });
                 } else {
                     relayout(window.app_handle());
                 }
