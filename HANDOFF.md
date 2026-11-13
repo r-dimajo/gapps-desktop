@@ -54,9 +54,15 @@ google-suite-linux/
 - Right-click any tab and choose "Fissa scheda (Pin)".
 - Pinned tabs are placed at the beginning of the tab strip, compacted (icon-only), and protected from accidental closure.
 
-### 5. Badges Notifiche & Audio
-- **Unread Count**: Gmail and Chat parse unread email/message counts from the window title and display red counter pills on the tab, tray icon, and KDE taskbar.
-- **Audio Indicator & Mute**: Tabs playing audio (e.g. Google Meet) display a speaker icon 🔊; clicking it mutes/unmutes the tab directly.
+### 5. Badges Notifiche & Notifiche Desktop Popup Native
+- **Notifiche Popup Desktop per App**:
+  - Script dedicato [`tab-preload.js`](file:///home/dimric/google-suite-linux/tab-preload.js) che intercetta sia `window.Notification` che `ServiceWorkerRegistration.showNotification`.
+  - Permesso notifiche impostato automaticamente su `'granted'` (nessun banner fastidioso in Gmail o Chat).
+  - Pop-up nativi KDE Plasma (`org.freedesktop.Notifications`) con l'icona ufficiale dell'applicazione (Gmail, Chat, Calendar, Meet, ecc.) e titolo personalizzato (`Gmail • Mittente`, `Google Chat • Nome Canale`).
+  - Cliccando sul pop-up di notifica la finestra si apre e seleziona direttamente la scheda del messaggio/email.
+  - Test rapido disponibile nel menu ⚙ Impostazioni: *"Test notifica desktop..."*.
+- **Unread Count**: Gmail e Chat leggono i conteggi non letti e mostrano la pillola rossa sulla scheda, sulla tray e nella barra delle applicazioni di KDE.
+- **Audio Indicator & Mute**: Le schede che riproducono audio mostrano l'icona 🔊 cliccabile per mutare al volo.
 
 ### 6. System Tray Parity
 - KDE StatusNotifierItem tray icon (`icons/icon.png`).
