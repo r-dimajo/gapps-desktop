@@ -68,7 +68,7 @@ function render(state) {
     // App SVG Icon (switches to badged icon with red dot if there are unread notifications)
     const iconContainer = document.createElement("div");
     iconContainer.className = "tab-icon";
-    const hasUnread = Boolean(tab.unreadCount && tab.unreadCount > 0);
+    const hasUnread = Boolean((tab.unreadCount && tab.unreadCount > 0) || tab.hasNotification);
     const iconKey = hasUnread && typeof ICONS !== "undefined" && ICONS[tab.app + "_badged"]
       ? tab.app + "_badged"
       : tab.app;
@@ -83,11 +83,15 @@ function render(state) {
     title.textContent = tab.title || (appDef ? appDef.title : "Nuova scheda");
     el.appendChild(title);
 
-    // Unread count badge
-    if (tab.unreadCount && tab.unreadCount > 0) {
+    // Unread count badge / dot
+    if (hasUnread) {
       const badge = document.createElement("span");
       badge.className = "badge";
-      badge.textContent = tab.unreadCount > 99 ? "99+" : tab.unreadCount;
+      if (tab.unreadCount && tab.unreadCount > 0) {
+        badge.textContent = tab.unreadCount > 99 ? "99+" : tab.unreadCount;
+      } else {
+        badge.classList.add("badge-dot");
+      }
       el.appendChild(badge);
     }
 

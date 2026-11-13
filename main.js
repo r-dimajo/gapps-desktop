@@ -266,6 +266,7 @@ function broadcastState() {
         url: t.url,
         pinned: Boolean(t.pinned),
         unreadCount: t.unreadCount || 0,
+        hasNotification: Boolean(t.hasNotification),
         isAudible: Boolean(t.isAudible),
         isMuted: Boolean(t.isMuted)
       })),
@@ -276,7 +277,10 @@ function broadcastState() {
 }
 
 function updateAppBadge() {
-  const totalUnread = state.tabs.reduce((sum, t) => sum + (t.unreadCount || 0), 0);
+  const totalUnread = state.tabs.reduce(
+    (sum, t) => sum + (t.unreadCount || 0) + (t.hasNotification ? 1 : 0),
+    0
+  );
   if (app.setBadgeCount) {
     app.setBadgeCount(totalUnread);
   }
@@ -292,20 +296,43 @@ function updateAppBadge() {
 function updateBounds() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const [width, height] = mainWindow.getContentSize();
+  if (width <= 0 || height <= 0) return;
 
   if (tabbarView) {
     tabbarView.setBounds({ x: 0, y: 0, width, height: TABBAR_HEIGHT });
+    try {
+      if (tabbarView.webContents && !tabbarView.webContents.isDestroyed()) {
+        tabbarView.webContents.invalidate();
+      }
+    } catch (_) {}
   }
 
   if (state.active && tabViews.has(state.active)) {
     const activeView = tabViews.get(state.active);
+    const viewHeight = Math.max(0, height - TABBAR_HEIGHT);
     activeView.setBounds({
       x: 0,
       y: TABBAR_HEIGHT,
       width,
-      height: Math.max(0, height - TABBAR_HEIGHT)
+      height: viewHeight
     });
+    try {
+      activeView.setVisible(true);
+      if (activeView.webContents && !activeView.webContents.isDestroyed()) {
+        activeView.webContents.invalidate();
+      }
+    } catch (_) {}
   }
+}
+
+let resizeDebounceTimer = null;
+function scheduleUpdateBounds() {
+  updateBounds();
+  if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+  resizeDebounceTimer = setTimeout(() => {
+    updateBounds();
+    setTimeout(updateBounds, 120);
+  }, 40);
 }
 
 function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
@@ -340,15 +367,24 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     displayTitle = `${appDef.title} • ${displayTitle}`;
   }
 
+  // Set urgency to 'normal' so KDE Plasma uses its classic auto-expire countdown timer
   const notification = new Notification({
     title: displayTitle,
     body: body || '',
     icon: notifIcon,
-    urgency: appId === 'chat' || appId === 'meet' ? 'critical' : 'normal',
+    urgency: 'normal',
     silent: false
   });
 
+  // KDE classic style: auto-expire after 5 seconds
+  const autoCloseTimer = setTimeout(() => {
+    try {
+      notification.close();
+    } catch (_) {}
+  }, 5000);
+
   notification.on('click', () => {
+    clearTimeout(autoCloseTimer);
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.show();
@@ -361,7 +397,36 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     }
   });
 
-  notification.show();
+  notification.on('close', () => {
+    clearTimeout(autoCloseTimer);
+  });
+
+  try {
+    notification.show();
+  } catch (err) {
+    console.error('Failed to show notification:', err);
+  }
+}
+
+function triggerNotificationForApp(appId, title, body) {
+  let targetTab = state.tabs.find((t) => t.app === appId);
+  if (!targetTab && state.tabs.length > 0) {
+    targetTab = state.tabs[0];
+  }
+  if (targetTab) {
+    targetTab.hasNotification = true;
+    targetTab.unreadCount = (targetTab.unreadCount || 0) + 1;
+    updateAppBadge();
+    broadcastState();
+  } else {
+    updateAppBadge();
+  }
+  showCustomNotification({
+    title,
+    body,
+    appId,
+    tabId: targetTab ? targetTab.id : null
+  });
 }
 
 function createTabView(tab) {
@@ -557,6 +622,12 @@ function activateTab(tabId) {
   }
 
   state.active = tabId;
+  tab.lastAccessed = Date.now();
+  if (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0)) {
+    tab.hasNotification = false;
+    tab.unreadCount = 0;
+    updateAppBadge();
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setTitle(`${tab.title || 'Google Suite'} — Google Suite`);
   }
@@ -734,31 +805,19 @@ function showSettingsMenu() {
     {
       label: 'Test notifica Google Chat...',
       click: () => {
-        showCustomNotification({
-          title: 'Mario Rossi',
-          body: 'Ciao! Questa è una notifica di prova con la vera icona di Google Chat.',
-          appId: 'chat'
-        });
+        triggerNotificationForApp('chat', 'Mario Rossi', 'Ciao! Notifica di prova Google Chat con timer KDE.');
       }
     },
     {
       label: 'Test notifica Gmail...',
       click: () => {
-        showCustomNotification({
-          title: 'Google Suite Team',
-          body: 'Notifica di prova Gmail con l\'icona ufficiale rossa.',
-          appId: 'gmail'
-        });
+        triggerNotificationForApp('gmail', 'Google Suite Team', 'Notifica di prova Gmail con timer KDE.');
       }
     },
     {
       label: 'Test notifica Google Gemini...',
       click: () => {
-        showCustomNotification({
-          title: 'Google Gemini',
-          body: 'Notifica di prova con l\'icona ufficiale a stella di Gemini.',
-          appId: 'gemini'
-        });
+        triggerNotificationForApp('gemini', 'Google Gemini', 'Notifica di prova con stella Gemini e timer KDE.');
       }
     },
     {
@@ -997,13 +1056,23 @@ ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
     }
   }
 
+  const targetTab = senderTab || state.tabs.find((t) => t.app === appId);
+  if (targetTab) {
+    targetTab.hasNotification = true;
+    targetTab.unreadCount = (targetTab.unreadCount || 0) + 1;
+    updateAppBadge();
+    broadcastState();
+  } else {
+    updateAppBadge();
+  }
+
   showCustomNotification({
     title,
     body,
     icon,
     tag,
     appId,
-    tabId: senderTab ? senderTab.id : null
+    tabId: targetTab ? targetTab.id : null
   });
 });
 
@@ -1020,9 +1089,6 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('gapps');
   loadSettings();
   loadState();
-
-  // Generate crisp 128x128 PNG app icons from SVG vectors for desktop notifications
-  await ensureAppIcons();
 
   // Register Global System Hotkey (Ctrl+Alt+G) to toggle Google Suite from anywhere on Linux
   try {
@@ -1080,13 +1146,14 @@ app.whenReady().then(async () => {
   }
 
   // Create main window
+  const appWindowIcon = nativeImage.createFromPath(ICON_PATH);
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 700,
     minHeight: 500,
     title: 'Google Suite',
-    icon: ICON_PATH,
+    icon: appWindowIcon,
     autoHideMenuBar: true,
     backgroundColor: '#202124',
     show: false
@@ -1125,8 +1192,19 @@ app.whenReady().then(async () => {
     });
   }, 1000);
 
+  // Safely ensure app icons in the background without blocking window launch
+  setTimeout(() => {
+    ensureAppIcons().catch((err) => console.warn('Background icon verification:', err));
+  }, 2000);
+
   updateBounds();
-  mainWindow.on('resize', updateBounds);
+  mainWindow.on('resize', scheduleUpdateBounds);
+  mainWindow.on('resized', scheduleUpdateBounds);
+  mainWindow.on('maximize', scheduleUpdateBounds);
+  mainWindow.on('unmaximize', scheduleUpdateBounds);
+  mainWindow.on('enter-full-screen', scheduleUpdateBounds);
+  mainWindow.on('leave-full-screen', scheduleUpdateBounds);
+  mainWindow.on('restore', scheduleUpdateBounds);
 
   // Close to tray behavior
   mainWindow.on('close', (event) => {
