@@ -10,7 +10,8 @@ const {
   dialog,
   session,
   desktopCapturer,
-  globalShortcut
+  globalShortcut,
+  Notification
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -36,6 +37,7 @@ const CONFIG_DIR = path.join(app.getPath('userData'));
 const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
 const ICON_PATH = path.join(__dirname, 'icons', 'icon.png');
+const ICONS_DIR = path.join(__dirname, 'icons', 'apps');
 const NEW_TAB_URL = 'file://' + path.join(__dirname, 'newtab', 'index.html');
 
 let mainWindow = null;
@@ -56,6 +58,35 @@ let settings = {
 
 // Map of tabId -> WebContentsView
 const tabViews = new Map();
+
+function ensureAppIcons() {
+  try {
+    fs.mkdirSync(ICONS_DIR, { recursive: true });
+    const { ICONS } = require('./svg-icons');
+    for (const [key, svg] of Object.entries(ICONS)) {
+      const pngPath = path.join(ICONS_DIR, `${key}.png`);
+      if (!fs.existsSync(pngPath)) {
+        const svg128 = svg
+          .replace(/width="[^"]*"/, 'width="128"')
+          .replace(/height="[^"]*"/, 'height="128"');
+        const img = nativeImage.createFromBuffer(Buffer.from(svg128));
+        if (!img.isEmpty()) {
+          fs.writeFileSync(pngPath, img.toPNG());
+        } else if (fs.existsSync(ICON_PATH)) {
+          fs.copyFileSync(ICON_PATH, pngPath);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to generate app PNG icons:', err);
+  }
+}
+
+function getAppIconPath(appId) {
+  const p = path.join(ICONS_DIR, `${appId}.png`);
+  if (fs.existsSync(p)) return p;
+  return ICON_PATH;
+}
 
 function loadSettings() {
   try {
@@ -195,15 +226,62 @@ function updateBounds() {
   }
 }
 
+function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
+  if (!Notification.isSupported()) return;
+
+  const appDef = byId(appId);
+  const appName = appDef ? appDef.title : 'Google Suite';
+  const iconPath = getAppIconPath(appId);
+
+  // Format custom title & branding per app
+  let displayTitle = title || appName;
+  if (appId === 'gmail') {
+    displayTitle = title ? `Gmail • ${title}` : 'Nuova email ricevuta';
+  } else if (appId === 'chat') {
+    displayTitle = title ? `Google Chat • ${title}` : 'Nuovo messaggio in Chat';
+  } else if (appId === 'calendar') {
+    displayTitle = title ? `Google Calendar • ${title}` : 'Promemoria Google Calendar';
+  } else if (appId === 'meet') {
+    displayTitle = title ? `Google Meet • ${title}` : 'Google Meet';
+  } else if (appDef && !displayTitle.toLowerCase().includes(appDef.title.toLowerCase())) {
+    displayTitle = `${appDef.title} • ${displayTitle}`;
+  }
+
+  const notification = new Notification({
+    title: displayTitle,
+    body: body || '',
+    icon: iconPath,
+    urgency: appId === 'chat' || appId === 'meet' ? 'critical' : 'normal',
+    silent: false
+  });
+
+  notification.on('click', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+
+    if (tabId && state.tabs.some((t) => t.id === tabId)) {
+      activateTab(tabId);
+    } else if (appId) {
+      showAndSwitchTo(appId);
+    }
+  });
+
+  notification.show();
+}
+
 function createTabView(tab) {
   const isLocalNewTab = tab.url.startsWith('file://');
 
   const view = new WebContentsView({
     webPreferences: {
-      preload: isLocalNewTab ? path.join(__dirname, 'preload.js') : undefined,
+      preload: isLocalNewTab
+        ? path.join(__dirname, 'preload.js')
+        : path.join(__dirname, 'tab-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: !isLocalNewTab,
+      sandbox: false,
       spellcheck: true
     }
   });
@@ -327,7 +405,7 @@ function navigateCurrentTab(url, appId = null) {
 
   let view = tabViews.get(tab.id);
   if (view) {
-    // If transitioning from local newtab to remote Google app, recreate view for proper sandbox
+    // If transitioning from local newtab to remote Google app, recreate view for proper preload & sandbox
     if (view.webContents.getURL().startsWith('file://') && !url.startsWith('file://')) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         try { mainWindow.contentView.removeChildView(view); } catch (_) {}
@@ -556,6 +634,16 @@ function showSettingsMenu() {
     },
     { type: 'separator' },
     {
+      label: 'Test notifica desktop...',
+      click: () => {
+        showCustomNotification({
+          title: 'Notifica di test',
+          body: 'Le notifiche popup di Google Suite funzionano perfettamente!',
+          appId: 'gmail'
+        });
+      }
+    },
+    {
       label: 'Cancella cache...',
       click: async () => {
         await session.defaultSession.clearCache();
@@ -634,7 +722,6 @@ function createTray() {
       submenu: allAppsSubmenu
     },
     { type: 'separator' },
-    // Direct shortcuts to all 10 apps
     ...APPS.map((app) => ({
       label: app.title,
       click: () => showAndSwitchTo(app.id)
@@ -760,6 +847,29 @@ ipcMain.handle('show-app-menu', () => showAppMenu());
 ipcMain.handle('show-tab-menu', (_event, id) => showTabMenu(id));
 ipcMain.handle('show-settings-menu', () => showSettingsMenu());
 
+// Receive notifications from web pages (Gmail, Google Chat, etc.)
+ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
+  let senderTab = null;
+  for (const [id, view] of tabViews.entries()) {
+    if (view && !view.webContents.isDestroyed() && view.webContents.id === event.sender.id) {
+      senderTab = state.tabs.find((t) => t.id === id);
+      break;
+    }
+  }
+
+  const detected = detectApp(event.sender.getURL());
+  const appId = senderTab ? senderTab.app : (detected ? detected.id : 'gmail');
+
+  showCustomNotification({
+    title,
+    body,
+    icon,
+    tag,
+    appId,
+    tabId: senderTab ? senderTab.id : null
+  });
+});
+
 app.on('second-instance', (_event, commandLine) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -770,6 +880,8 @@ app.on('second-instance', (_event, commandLine) => {
 });
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('gapps');
+  ensureAppIcons();
   loadSettings();
   loadState();
 
@@ -788,12 +900,18 @@ app.whenReady().then(() => {
   session.defaultSession.setUserAgent(cleanUa);
 
   // Grant Meet & Google Suite permissions automatically
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    if (permission === 'notifications') return true;
+    if (permission === 'media') return true;
+    return true;
+  });
+
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     const url = webContents.getURL();
     if (isInternal(url)) {
       const allowed = [
-        'media',
         'notifications',
+        'media',
         'display-capture',
         'mediaKeySystem',
         'clipboard-read',
@@ -803,7 +921,7 @@ app.whenReady().then(() => {
         return callback(true);
       }
     }
-    callback(false);
+    callback(true);
   });
 
   // Setup screen capturer for Google Meet under Linux Wayland/PipeWire
