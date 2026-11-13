@@ -1,2 +1,3 @@
-/target
+target/
+src-tauri/target/
 dist/.DS_Store
