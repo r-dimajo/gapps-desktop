@@ -156,12 +156,23 @@ fn create_webview(
             NewWindowResponse::Deny
         });
 
-    window
-        .add_child(
+    let (tx, rx) = std::sync::mpsc::channel();
+    let win = window.clone();
+    let res = window.run_on_main_thread(move || {
+        let r = win.add_child(
             wb,
             LogicalPosition::new(0.0, STRIP),
             LogicalSize::new(w, h - STRIP),
-        )
+        );
+        let _ = tx.send(r);
+    });
+
+    if let Err(e) = res {
+        return Err(e.to_string());
+    }
+
+    rx.recv()
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
     apply_gtk_layout(&window);
@@ -279,7 +290,7 @@ pub fn ensure_booted(app: &AppHandle) {
     apply_gtk_layout(&window);
 
     // 2. Determine active tab from persisted state
-    let (active_id, active_url, active_app) = {
+    let (all_tabs, active_id) = {
         let st = app.state::<TabsState>();
         let mut guard = st.0.lock().unwrap();
         if guard.tabs.is_empty() {
@@ -293,40 +304,27 @@ pub fn ensure_booted(app: &AppHandle) {
                 title: "Gmail".into(),
             });
             guard.active = id;
-            (id, gmail.url.to_string(), "gmail".into())
+            (guard.tabs.clone(), id)
         } else {
             let active = guard.active;
-            let tab = guard.tabs.iter().find(|t| t.id == active).or_else(|| guard.tabs.first()).cloned();
-            match tab {
-                Some(t) => {
-                    guard.active = t.id;
-                    (t.id, t.url, t.app)
-                }
-                None => {
-                    let gmail = apps::by_id("gmail").unwrap();
-                    let id = guard.next_id;
-                    guard.next_id += 1;
-                    guard.tabs.push(state::Tab {
-                        id,
-                        url: gmail.url.to_string(),
-                        app: "gmail".into(),
-                        title: "Gmail".into(),
-                    });
-                    guard.active = id;
-                    (id, gmail.url.to_string(), "gmail".into())
-                }
+            if !guard.tabs.iter().any(|t| t.id == active) {
+                guard.active = guard.tabs.first().map(|t| t.id).unwrap_or(0);
             }
+            (guard.tabs.clone(), guard.active)
         }
     };
     state::save(app);
     state::emit(app);
 
-    // 3. Create ONLY the active tab on startup (other tabs load on demand)
-    let parsed: tauri::Url = active_url.parse().unwrap_or_else(|_| {
-        apps::by_id("gmail").unwrap().url.parse().unwrap()
-    });
-    let app_id = apps::by_id(&active_app).map(|d| d.id).unwrap_or("custom");
-    let _ = create_webview(app, active_id, parsed, app_id, false);
+    // 3. Create webviews for all saved tabs (active tab visible, others hidden)
+    for tab in all_tabs {
+        let is_active = tab.id == active_id;
+        let parsed: tauri::Url = tab.url.parse().unwrap_or_else(|_| {
+            apps::by_id("gmail").unwrap().url.parse().unwrap()
+        });
+        let app_id = apps::by_id(&tab.app).map(|d| d.id).unwrap_or("custom");
+        let _ = create_webview(app, tab.id, parsed, app_id, !is_active);
+    }
 
     // 4. Handle any initial launch arguments
     if let Some(args) = PENDING_ARGS.get() {
