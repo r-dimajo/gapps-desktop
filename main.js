@@ -498,6 +498,28 @@ ipcMain.handle('get-state', () => ({
 
 ipcMain.handle('activate-tab', (_event, id) => activateTab(id));
 ipcMain.handle('close-tab', (_event, id) => closeTab(id));
+ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
+  const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);
+  const targetIndex = state.tabs.findIndex((t) => t.id === targetId);
+  if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) return;
+
+  const [movedTab] = state.tabs.splice(sourceIndex, 1);
+  const newTargetIndex = state.tabs.findIndex((t) => t.id === targetId);
+  const insertIndex = dropAfter ? newTargetIndex + 1 : newTargetIndex;
+  state.tabs.splice(insertIndex, 0, movedTab);
+
+  saveState();
+  broadcastState();
+});
+ipcMain.handle('move-tab-to-end', (_event, sourceId) => {
+  const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);
+  if (sourceIndex === -1) return;
+  const [movedTab] = state.tabs.splice(sourceIndex, 1);
+  state.tabs.push(movedTab);
+
+  saveState();
+  broadcastState();
+});
 ipcMain.handle('reload-active', () => {
   if (state.active && tabViews.has(state.active)) {
     tabViews.get(state.active).webContents.reload();

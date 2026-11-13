@@ -59,7 +59,26 @@ html, body {
   background: var(--bg-tab);
   border-right: 1px solid var(--border);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.12s ease, opacity 0.15s ease, box-shadow 0.1s ease;
+  user-select: none;
+}
+
+.tab.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+.tab.drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.tab.drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent);
+}
+
+.tab .dot,
+.tab .title {
+  pointer-events: none;
 }
 
 .tab:hover {

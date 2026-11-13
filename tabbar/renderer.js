@@ -1,6 +1,13 @@
 const $ = (id) => document.getElementById(id);
 
 let currentState = null;
+let draggedTabId = null;
+
+function clearDropIndicators() {
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.remove("drop-before", "drop-after");
+  });
+}
 
 function render(state) {
   if (!state) return;
@@ -17,6 +24,47 @@ function render(state) {
     const el = document.createElement("div");
     el.className = "tab" + (tab.id === active ? " active" : "");
     el.title = `${tab.title || "Scheda"} (${index + 1})`;
+    el.dataset.id = tab.id;
+
+    // Drag and drop reordering
+    el.setAttribute("draggable", "true");
+
+    el.addEventListener("dragstart", (e) => {
+      draggedTabId = tab.id;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", tab.id);
+      setTimeout(() => el.classList.add("dragging"), 0);
+    });
+
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (!draggedTabId || draggedTabId === tab.id) return;
+      const rect = el.getBoundingClientRect();
+      const dropAfter = (e.clientX - rect.left) > rect.width / 2;
+      clearDropIndicators();
+      el.classList.add(dropAfter ? "drop-after" : "drop-before");
+    });
+
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("drop-before", "drop-after");
+    });
+
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      clearDropIndicators();
+      if (!draggedTabId || draggedTabId === tab.id) return;
+      const rect = el.getBoundingClientRect();
+      const dropAfter = (e.clientX - rect.left) > rect.width / 2;
+      window.gapps.moveTab(draggedTabId, tab.id, dropAfter);
+      draggedTabId = null;
+    });
+
+    el.addEventListener("dragend", () => {
+      draggedTabId = null;
+      clearDropIndicators();
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("dragging"));
+    });
 
     const dot = document.createElement("span");
     dot.className = "dot";
@@ -30,6 +78,7 @@ function render(state) {
     closeBtn.className = "x";
     closeBtn.title = "Chiudi scheda (Ctrl+W)";
     closeBtn.innerHTML = "&#10005;";
+    closeBtn.setAttribute("draggable", "false");
 
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -65,6 +114,22 @@ function render(state) {
     }
   });
 }
+
+// Container drop for moving to end
+const tabsContainer = $("tabs");
+tabsContainer.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+});
+
+tabsContainer.addEventListener("drop", (e) => {
+  if (e.target === tabsContainer && draggedTabId) {
+    e.preventDefault();
+    clearDropIndicators();
+    window.gapps.moveTabToEnd(draggedTabId);
+    draggedTabId = null;
+  }
+});
 
 // Button actions
 $("new").addEventListener("click", () => window.gapps.showAppMenu());
