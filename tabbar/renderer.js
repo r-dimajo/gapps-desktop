@@ -12,6 +12,25 @@ function clearDropIndicators() {
 function render(state) {
   if (!state) return;
   currentState = state;
+
+  const isVertical = state.layout === "vertical";
+  document.documentElement.classList.toggle("vertical", isVertical);
+  document.body.classList.toggle("vertical", isVertical);
+
+  // Set toggle buttons & brand icons from SVG definitions
+  const topToggle = $("toggle-layout-top");
+  if (topToggle && typeof ICONS !== "undefined" && ICONS.layoutHorizontal) {
+    topToggle.innerHTML = ICONS.layoutHorizontal;
+  }
+  const stripToggle = $("toggle-layout-strip");
+  if (stripToggle && typeof ICONS !== "undefined" && ICONS.layoutVertical) {
+    stripToggle.innerHTML = ICONS.layoutVertical;
+  }
+  const brandIconEl = document.querySelector(".brand-icon");
+  if (brandIconEl && typeof ICONS !== "undefined" && ICONS.tray) {
+    brandIconEl.innerHTML = ICONS.tray;
+  }
+
   const container = $("tabs");
   container.textContent = "";
 
@@ -40,7 +59,9 @@ function render(state) {
       e.dataTransfer.dropEffect = "move";
       if (!draggedTabId || draggedTabId === tab.id) return;
       const rect = el.getBoundingClientRect();
-      const dropAfter = (e.clientX - rect.left) > rect.width / 2;
+      const dropAfter = isVertical
+        ? (e.clientY - rect.top) > rect.height / 2
+        : (e.clientX - rect.left) > rect.width / 2;
       clearDropIndicators();
       el.classList.add(dropAfter ? "drop-after" : "drop-before");
     });
@@ -54,7 +75,9 @@ function render(state) {
       clearDropIndicators();
       if (!draggedTabId || draggedTabId === tab.id) return;
       const rect = el.getBoundingClientRect();
-      const dropAfter = (e.clientX - rect.left) > rect.width / 2;
+      const dropAfter = isVertical
+        ? (e.clientY - rect.top) > rect.height / 2
+        : (e.clientX - rect.left) > rect.width / 2;
       window.gapps.moveTab(draggedTabId, tab.id, dropAfter);
       draggedTabId = null;
     });
@@ -185,9 +208,21 @@ $("new").addEventListener("contextmenu", (e) => {
 $("reload").addEventListener("click", () => window.gapps.reloadActive());
 $("gear").addEventListener("click", () => window.gapps.showSettingsMenu());
 
+const topToggle = $("toggle-layout-top");
+if (topToggle) {
+  topToggle.addEventListener("click", () => window.gapps.toggleTabLayout());
+}
+const stripToggle = $("toggle-layout-strip");
+if (stripToggle) {
+  stripToggle.addEventListener("click", () => window.gapps.toggleTabLayout());
+}
+
 // Keyboard shortcuts within tabbar
 window.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && (e.key === "t" || e.key === "T")) {
+  if (e.ctrlKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
+    e.preventDefault();
+    window.gapps.toggleTabLayout();
+  } else if (e.ctrlKey && (e.key === "t" || e.key === "T")) {
     e.preventDefault();
     window.gapps.openNewTab();
   } else if (e.ctrlKey && (e.key === "w" || e.key === "W")) {

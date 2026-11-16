@@ -1,5 +1,6 @@
 :root {
   --strip-h: 36px;
+  --sidebar-w: 210px;
   --bg: #202124;
   --bg-tab: #292a2d;
   --bg-tab-hover: #35363a;
@@ -18,6 +19,10 @@
   padding: 0;
 }
 
+/* ========================================================
+   Default / Horizontal Tabs Mode (In alto)
+   ======================================================== */
+
 html, body {
   height: 36px;
   max-height: 36px;
@@ -30,6 +35,14 @@ html, body {
   -webkit-user-select: none;
 }
 
+.v-only {
+  display: none !important;
+}
+
+.h-only {
+  display: flex !important;
+}
+
 #strip {
   display: flex;
   align-items: stretch;
@@ -38,10 +51,16 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 
+#new-tab-wrapper {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
 #tabs {
   display: flex;
   align-items: stretch;
-  max-width: calc(100vw - 120px);
+  max-width: calc(100vw - 160px);
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -88,7 +107,7 @@ html, body {
   box-shadow: inset -3px 0 0 0 var(--accent);
 }
 
-/* Pinned tabs */
+/* Pinned tabs in horizontal mode */
 .tab.pinned {
   min-width: 44px;
   max-width: 44px;
@@ -171,6 +190,7 @@ html, body {
   background: none;
 }
 
+/* Close button */
 .tab .x {
   border: none;
   background: none;
@@ -191,6 +211,7 @@ html, body {
   color: #fff;
 }
 
+/* Lock button */
 .tab .lock-btn {
   border: none;
   background: none;
@@ -223,7 +244,7 @@ button {
   border: none;
   color: var(--fg-dim);
   font-size: 16px;
-  padding: 0 12px;
+  padding: 0 10px;
   cursor: pointer;
   height: 35px;
   display: flex;
@@ -243,7 +264,249 @@ button:hover {
   padding: 0 10px;
 }
 
+.icon-btn {
+  width: 32px;
+  height: 35px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+}
+
+.icon-btn:hover {
+  color: var(--fg);
+  background: var(--bg-tab-hover);
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 #drag {
   flex: 1;
   height: 35px;
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+/* ========================================================
+   Vertical Tabs Mode (Di lato / Sidebar)
+   ======================================================== */
+
+html.vertical, html.vertical body {
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+html.vertical .v-only {
+  display: flex !important;
+}
+
+html.vertical .h-only {
+  display: none !important;
+}
+
+html.vertical #strip {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  height: 100%;
+  width: 100%;
+  background: var(--bg);
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+}
+
+/* Sidebar header */
+html.vertical #sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  height: 42px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex: none;
+}
+
+html.vertical .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+html.vertical .brand-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+html.vertical .brand-title {
+  letter-spacing: -0.2px;
+}
+
+html.vertical #toggle-layout-top {
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  border-radius: 4px;
+}
+
+/* New tab button in vertical mode */
+html.vertical #new-tab-wrapper {
+  padding: 8px 10px 4px 10px;
+  width: 100%;
+  flex: none;
+  display: flex;
+}
+
+html.vertical #new {
+  width: 100%;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+html.vertical #new:hover {
+  background: var(--bg-tab-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+html.vertical #new .btn-icon {
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+html.vertical #new .btn-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Tabs list in vertical mode */
+html.vertical #tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1;
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 8px;
+  gap: 3px;
+}
+
+html.vertical #tabs::-webkit-scrollbar {
+  width: 4px;
+  display: block;
+}
+
+html.vertical #tabs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+html.vertical #tabs::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+html.vertical .tab {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  height: 36px;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+html.vertical .tab:hover {
+  background: var(--bg-tab-hover);
+}
+
+html.vertical .tab.active {
+  background: var(--bg-active);
+  border-bottom: none;
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+html.vertical .tab.pinned {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  padding: 0 8px;
+  justify-content: flex-start;
+}
+
+html.vertical .tab.pinned .title {
+  display: block;
+}
+
+/* Vertical drop indicators */
+html.vertical .tab.drop-before {
+  box-shadow: inset 0 3px 0 0 var(--accent);
+}
+
+html.vertical .tab.drop-after {
+  box-shadow: inset 0 -3px 0 0 var(--accent);
+}
+
+/* Spacer */
+html.vertical #drag {
+  flex: none;
+  height: 4px;
+}
+
+/* Bottom footer controls */
+html.vertical #controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 4px;
+  width: 100%;
+  flex: none;
+}
+
+html.vertical #controls button {
+  height: 28px;
+  width: 32px;
+  border-radius: 4px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

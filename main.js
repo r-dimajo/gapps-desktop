@@ -34,6 +34,7 @@ if (!gotLock) {
 }
 
 const TABBAR_HEIGHT = 36;
+const VERTICAL_TABBAR_WIDTH = 210;
 const CONFIG_DIR = path.join(app.getPath('userData'));
 const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
@@ -54,8 +55,13 @@ let state = {
 let settings = {
   open_at_startup: true,
   start_minimized: false,
-  memory_saver: true
+  memory_saver: true,
+  tab_layout: 'horizontal' // 'horizontal' | 'vertical'
 };
+
+function isVerticalTabs() {
+  return settings.tab_layout === 'vertical';
+}
 
 // Map of tabId -> WebContentsView
 const tabViews = new Map();
@@ -78,7 +84,7 @@ async function ensureAppIcons() {
     const keysToGenerate = [];
 
     for (const [key, svg] of Object.entries(ICONS)) {
-      if (['audio', 'muted', 'pin', 'newtab', 'lock'].includes(key)) continue;
+      if (['audio', 'muted', 'pin', 'newtab', 'lock', 'layoutVertical', 'layoutHorizontal'].includes(key)) continue;
       const pngPath = path.join(ICONS_DIR, `${key}.png`);
       const hash = crypto.createHash('md5').update(svg).digest('hex');
       if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 200 || meta[key] !== hash) {
@@ -369,7 +375,8 @@ function broadcastState() {
         isMuted: Boolean(t.isMuted)
       })),
       active: state.active,
-      apps: APPS
+      apps: APPS,
+      layout: settings.tab_layout || 'horizontal'
     });
   }
 }
@@ -396,8 +403,14 @@ function updateBounds() {
   const [width, height] = mainWindow.getContentSize();
   if (width <= 0 || height <= 0) return;
 
+  const vertical = isVerticalTabs();
+
   if (tabbarView) {
-    tabbarView.setBounds({ x: 0, y: 0, width, height: TABBAR_HEIGHT });
+    if (vertical) {
+      tabbarView.setBounds({ x: 0, y: 0, width: VERTICAL_TABBAR_WIDTH, height });
+    } else {
+      tabbarView.setBounds({ x: 0, y: 0, width, height: TABBAR_HEIGHT });
+    }
     try {
       if (tabbarView.webContents && !tabbarView.webContents.isDestroyed()) {
         tabbarView.webContents.invalidate();
@@ -407,13 +420,23 @@ function updateBounds() {
 
   if (state.active && tabViews.has(state.active)) {
     const activeView = tabViews.get(state.active);
-    const viewHeight = Math.max(0, height - TABBAR_HEIGHT);
-    activeView.setBounds({
-      x: 0,
-      y: TABBAR_HEIGHT,
-      width,
-      height: viewHeight
-    });
+    if (vertical) {
+      const viewWidth = Math.max(0, width - VERTICAL_TABBAR_WIDTH);
+      activeView.setBounds({
+        x: VERTICAL_TABBAR_WIDTH,
+        y: 0,
+        width: viewWidth,
+        height
+      });
+    } else {
+      const viewHeight = Math.max(0, height - TABBAR_HEIGHT);
+      activeView.setBounds({
+        x: 0,
+        y: TABBAR_HEIGHT,
+        width,
+        height: viewHeight
+      });
+    }
     try {
       activeView.setVisible(true);
       if (activeView.webContents && !activeView.webContents.isDestroyed()) {
@@ -539,6 +562,14 @@ function createTabView(tab) {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: true
+    }
+  });
+
+  // Global hotkeys inside tab contents
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'v') {
+      event.preventDefault();
+      toggleTabLayout();
     }
   });
 
@@ -867,6 +898,11 @@ function showTabMenu(tabId) {
     },
     { type: 'separator' },
     {
+      label: settings.tab_layout === 'vertical' ? 'Sposta schede in alto (Orizzontale)' : 'Sposta schede di lato (Verticale)',
+      click: () => toggleTabLayout()
+    },
+    { type: 'separator' },
+    {
       label: 'Chiudi scheda',
       enabled: !tab.pinned && !tab.locked,
       click: () => closeTab(tabId)
@@ -885,8 +921,37 @@ function showTabMenu(tabId) {
   menu.popup({ window: mainWindow });
 }
 
+function setTabLayout(layout) {
+  settings.tab_layout = layout === 'vertical' ? 'vertical' : 'horizontal';
+  saveSettings();
+  updateBounds();
+  broadcastState();
+}
+
+function toggleTabLayout() {
+  setTabLayout(settings.tab_layout === 'vertical' ? 'horizontal' : 'vertical');
+}
+
 function showSettingsMenu() {
   const template = [
+    {
+      label: 'Disposizione schede',
+      submenu: [
+        {
+          label: 'In alto (Orizzontale)',
+          type: 'radio',
+          checked: settings.tab_layout !== 'vertical',
+          click: () => setTabLayout('horizontal')
+        },
+        {
+          label: 'Di lato (Verticale)',
+          type: 'radio',
+          checked: settings.tab_layout === 'vertical',
+          click: () => setTabLayout('vertical')
+        }
+      ]
+    },
+    { type: 'separator' },
     {
       label: "Avvia all'avvio del sistema",
       type: 'checkbox',
@@ -1109,7 +1174,8 @@ ipcMain.handle('get-state', () => ({
     isMuted: Boolean(t.isMuted)
   })),
   active: state.active,
-  apps: APPS
+  apps: APPS,
+  layout: settings.tab_layout || 'horizontal'
 }));
 
 ipcMain.handle('get-apps', () => APPS);
@@ -1122,6 +1188,8 @@ ipcMain.handle('close-tab', (_event, id) => closeTab(id));
 ipcMain.handle('toggle-lock-tab', (_event, id) => toggleLockTab(id));
 ipcMain.handle('toggle-pin-tab', (_event, id) => togglePinTab(id));
 ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
+ipcMain.handle('set-tab-layout', (_event, layout) => setTabLayout(layout));
+ipcMain.handle('toggle-tab-layout', () => toggleTabLayout());
 
 ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
   const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);

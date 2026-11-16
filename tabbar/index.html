@@ -6,11 +6,35 @@
 </head>
 <body>
   <div id="strip">
+    <!-- Header shown only in vertical mode -->
+    <div id="sidebar-header" class="v-only">
+      <div class="sidebar-brand">
+        <span class="brand-icon"></span>
+        <span class="brand-title">Google Suite</span>
+      </div>
+      <button id="toggle-layout-top" class="icon-btn" title="Disponi schede in alto (Orizzontale) (Ctrl+Shift+V)"></button>
+    </div>
+
+    <!-- New Tab button and Horizontal Layout Toggle -->
+    <div id="new-tab-wrapper">
+      <button id="new" title="Nuova scheda (+)">
+        <span class="btn-icon">+</span>
+        <span class="btn-text v-only">Nuova scheda</span>
+      </button>
+      <button id="toggle-layout-strip" class="h-only icon-btn" title="Disponi schede di lato (Verticale) (Ctrl+Shift+V)"></button>
+    </div>
+
+    <!-- Tabs Container -->
     <div id="tabs"></div>
-    <button id="new" title="Nuova scheda (+)">+</button>
+
+    <!-- Draggable / spacer area -->
     <div id="drag"></div>
-    <button id="reload" title="Ricarica scheda (Ctrl+R)">&#10227;</button>
-    <button id="gear" title="Impostazioni">&#9881;</button>
+
+    <!-- Controls / Footer -->
+    <div id="controls">
+      <button id="reload" title="Ricarica scheda (Ctrl+R)">&#10227;</button>
+      <button id="gear" title="Impostazioni">&#9881;</button>
+    </div>
   </div>
   <script src="../svg-icons.js"></script>
   <script src="renderer.js"></script>

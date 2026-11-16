@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('gapps', {
   showAppMenu: () => ipcRenderer.invoke('show-app-menu'),
   showTabMenu: (id) => ipcRenderer.invoke('show-tab-menu', id),
   showSettingsMenu: () => ipcRenderer.invoke('show-settings-menu'),
+  setTabLayout: (layout) => ipcRenderer.invoke('set-tab-layout', layout),
+  toggleTabLayout: () => ipcRenderer.invoke('toggle-tab-layout'),
   onState: (callback) => {
     ipcRenderer.on('state-update', (_e, state) => callback(state));
   }
