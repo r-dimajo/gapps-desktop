@@ -1225,12 +1225,14 @@ function toggleWindow() {
     mainWindow.show();
     mainWindow.focus();
   }
+  updateTrayMenu();
 }
 
 function showAndSwitchTo(appId) {
   if (!mainWindow) return;
   mainWindow.show();
   mainWindow.focus();
+  updateTrayMenu();
   const existing = state.tabs.find((t) => t.app === appId);
   if (existing) {
     activateTab(existing.id);
@@ -1240,60 +1242,71 @@ function showAndSwitchTo(appId) {
   }
 }
 
+function updateTrayMenu() {
+  if (!tray) return;
+  const isVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+
+  // Nested submenu with all 11 apps
+  const allAppsSubmenu = APPS.map((app) => {
+    const iconPath = getAppIconPath(app.id);
+    let itemIcon = null;
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (!img.isEmpty()) {
+        itemIcon = img.resize({ width: 16, height: 16 });
+      }
+    } catch (_) {}
+
+    return {
+      label: `${app.title} — ${app.description}`,
+      icon: itemIcon || undefined,
+      click: () => showAndSwitchTo(app.id)
+    };
+  });
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: isVisible ? 'Hide Google Suite' : 'Show Google Suite',
+      accelerator: 'CmdOrCtrl+Alt+G',
+      click: toggleWindow
+    },
+    {
+      label: 'New tab (App grid)...',
+      click: () => {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        openNewTab();
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Google Apps',
+      submenu: allAppsSubmenu
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit Google Suite',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+}
+
 function createTray() {
   try {
     const icon = nativeImage.createFromPath(getTrayIconPath());
     tray = new Tray(icon);
     tray.setToolTip('Google Suite');
 
-    // Nested submenu with all 11 apps
-    const allAppsSubmenu = APPS.map((app) => {
-      const iconPath = getAppIconPath(app.id);
-      let itemIcon = null;
-      try {
-        const img = nativeImage.createFromPath(iconPath);
-        if (!img.isEmpty()) {
-          itemIcon = img.resize({ width: 16, height: 16 });
-        }
-      } catch (_) {}
+    updateTrayMenu();
 
-      return {
-        label: `${app.title} — ${app.description}`,
-        icon: itemIcon || undefined,
-        click: () => showAndSwitchTo(app.id)
-      };
-    });
-
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Show / Hide Google Suite',
-        click: toggleWindow
-      },
-      {
-        label: 'New tab (App grid)...',
-        click: () => {
-          if (!mainWindow.isVisible()) mainWindow.show();
-          mainWindow.focus();
-          openNewTab();
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Google Apps',
-        submenu: allAppsSubmenu
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit Google Suite',
-        click: () => {
-          app.isQuitting = true;
-          app.quit();
-        }
-      }
-    ]);
-
-    tray.setContextMenu(contextMenu);
     tray.on('click', toggleWindow);
+    tray.on('double-click', toggleWindow);
+    tray.on('middle-click', toggleWindow);
   } catch (err) {
     console.warn('[Google Suite] System tray not available in this environment:', err.message);
   }
@@ -1660,6 +1673,9 @@ app.whenReady().then(async () => {
       mainWindow.hide();
     }
   });
+
+  mainWindow.on('show', updateTrayMenu);
+  mainWindow.on('hide', updateTrayMenu);
 
   createTray();
 
