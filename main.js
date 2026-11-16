@@ -401,6 +401,17 @@ function updateAppBadge() {
   }
 }
 
+function clearTabNotification(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  if (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0)) {
+    tab.hasNotification = false;
+    tab.unreadCount = 0;
+    updateAppBadge();
+    broadcastState();
+  }
+}
+
 function updateBounds() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const [width, height] = mainWindow.getContentSize();
@@ -568,11 +579,20 @@ function createTabView(tab) {
     }
   });
 
-  // Global hotkeys inside tab contents
+  // Global hotkeys inside tab contents & dismiss notification on active interaction
   view.webContents.on('before-input-event', (event, input) => {
+    if (state.active === tab.id && (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0))) {
+      clearTabNotification(tab.id);
+    }
     if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'v') {
       event.preventDefault();
       toggleTabLayout();
+    }
+  });
+
+  view.webContents.on('focus', () => {
+    if (state.active === tab.id) {
+      clearTabNotification(tab.id);
     }
   });
 
@@ -641,7 +661,11 @@ function createTabView(tab) {
 
       // Extract unread message count from title (e.g. "Inbox (5) - user@gmail.com" or "(3) Google Chat")
       const match = title.match(/\(([0-9]+)\)/);
-      tab.unreadCount = match ? parseInt(match[1], 10) : 0;
+      const newUnreadCount = match ? parseInt(match[1], 10) : 0;
+      tab.unreadCount = newUnreadCount;
+      if (newUnreadCount === 0) {
+        tab.hasNotification = false;
+      }
       updateAppBadge();
 
       if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
@@ -795,11 +819,7 @@ function activateTab(tabId) {
 
   state.active = tabId;
   tab.lastAccessed = Date.now();
-  if (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0)) {
-    tab.hasNotification = false;
-    tab.unreadCount = 0;
-    updateAppBadge();
-  }
+  clearTabNotification(tabId);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setTitle(`${tab.title || 'Google Suite'} — Google Suite`);
   }
@@ -1210,6 +1230,7 @@ ipcMain.handle('get-state', () => ({
     pinned: Boolean(t.pinned),
     locked: Boolean(t.locked),
     unreadCount: t.unreadCount || 0,
+    hasNotification: Boolean(t.hasNotification),
     isAudible: Boolean(t.isAudible),
     isMuted: Boolean(t.isMuted)
   })),
@@ -1294,6 +1315,23 @@ ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
   }
 
   const targetTab = senderTab || state.tabs.find((t) => t.app === appId);
+
+  // If user is currently actively viewing this exact tab in the focused foreground window,
+  // do not flag unread or show an intrusive desktop popup
+  const isWindowActive =
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible() &&
+    mainWindow.isFocused();
+  const isViewingCurrentTab = Boolean(
+    targetTab && state.active === targetTab.id && isWindowActive
+  );
+
+  if (isViewingCurrentTab) {
+    clearTabNotification(targetTab.id);
+    return;
+  }
+
   if (targetTab) {
     targetTab.hasNotification = true;
     targetTab.unreadCount = (targetTab.unreadCount || 0) + 1;
@@ -1311,6 +1349,18 @@ ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
     appId,
     tabId: targetTab ? targetTab.id : null
   });
+});
+
+// Dismiss unread indicators when user actively interacts with the tab
+ipcMain.on('tab-user-active', (event) => {
+  for (const [id, view] of tabViews.entries()) {
+    if (view && !view.webContents.isDestroyed() && view.webContents.id === event.sender.id) {
+      if (state.active === id) {
+        clearTabNotification(id);
+      }
+      break;
+    }
+  }
 });
 
 app.on('second-instance', (_event, commandLine) => {
@@ -1459,6 +1509,11 @@ app.whenReady().then(async () => {
   mainWindow.on('enter-full-screen', scheduleUpdateBounds);
   mainWindow.on('leave-full-screen', scheduleUpdateBounds);
   mainWindow.on('restore', scheduleUpdateBounds);
+  mainWindow.on('focus', () => {
+    if (state.active) {
+      clearTabNotification(state.active);
+    }
+  });
 
   // Close to tray behavior
   mainWindow.on('close', (event) => {

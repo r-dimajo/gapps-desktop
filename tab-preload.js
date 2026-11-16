@@ -1,8 +1,28 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
+let lastReportTime = 0;
+function reportUserActive() {
+  const now = Date.now();
+  if (now - lastReportTime > 800) {
+    lastReportTime = now;
+    try {
+      ipcRenderer.send('tab-user-active');
+    } catch (_) {}
+  }
+}
+
+// User interaction listeners inside the webview to dismiss unread indicators when active
+try {
+  window.addEventListener('focus', reportUserActive, true);
+  window.addEventListener('click', reportUserActive, true);
+  window.addEventListener('keydown', reportUserActive, true);
+  window.addEventListener('touchstart', reportUserActive, true);
+} catch (_) {}
+
 // Expose safe bridge to main world
 contextBridge.exposeInMainWorld('__gappsNotify', {
-  send: (data) => ipcRenderer.send('tab-notification', data)
+  send: (data) => ipcRenderer.send('tab-notification', data),
+  userActive: reportUserActive
 });
 
 // Inject notification proxy into main world so Gmail, Chat, and Calendar detect permission = 'granted'
@@ -63,6 +83,17 @@ try {
           return origShow ? origShow.apply(this, arguments) : Promise.resolve();
         };
       }
+
+      // Track user interactions to clear unread badges
+      ['focus', 'click', 'keydown', 'touchstart'].forEach(function(evt) {
+        try {
+          window.addEventListener(evt, function() {
+            if (window.__gappsNotify && window.__gappsNotify.userActive) {
+              window.__gappsNotify.userActive();
+            }
+          }, { capture: true, passive: true });
+        } catch (_) {}
+      });
     })();
   `);
 } catch (err) {
