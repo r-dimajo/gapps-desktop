@@ -150,6 +150,7 @@ const tabViews = new Map();
 
 // Generate distinct, crisp 128x128 PNG icons for all Google apps from SVG vectors
 async function ensureAppIcons() {
+  if (app.isPackaged) return;
   try {
     fs.mkdirSync(ICONS_DIR, { recursive: true });
     const { ICONS } = require('./svg-icons');
@@ -256,25 +257,26 @@ function getTrayBadgedIconPath() {
 
 function ensureDesktopFile() {
   if (process.platform !== 'linux') return;
+  // When installed as a system package (.deb, rpm, etc.), system desktop integration already exists
+  if (app.isPackaged) return;
+
   try {
     const home = process.env.HOME || app.getPath('home');
     const appsDir = path.join(home, '.local', 'share', 'applications');
     const iconsDir = path.join(home, '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
-    const targetIconPath = path.join(iconsDir, 'gapps.png');
     const targetIconPathSuite = path.join(iconsDir, 'google-suite.png');
     const sourceIcon = path.resolve(ICON_PATH);
     const launcherPath = path.join(__dirname, 'google-suite');
 
-    // 1. Install hicolor icon for both gapps and google-suite
+    // 1. Install hicolor icon for google-suite
     try {
       if (!fs.existsSync(iconsDir)) {
         fs.mkdirSync(iconsDir, { recursive: true });
       }
-      fs.copyFileSync(sourceIcon, targetIconPath);
       fs.copyFileSync(sourceIcon, targetIconPathSuite);
     } catch (_) {}
 
-    // 2. Install .desktop file for both gapps.desktop and google-suite.desktop
+    // 2. Install .desktop file for development mode
     if (!fs.existsSync(appsDir)) {
       fs.mkdirSync(appsDir, { recursive: true });
     }
@@ -283,22 +285,19 @@ function ensureDesktopFile() {
 Type=Application
 Version=1.0
 Name=Google Suite
-Comment=Google Suite desktop shell for Linux
+Comment=Google Workspace desktop client for Linux
 Exec=${launcherPath}
 Icon=${sourceIcon}
 Terminal=false
-StartupWMClass=gapps
+StartupWMClass=google-suite
 StartupNotify=true
 Categories=Network;Office;Chat;
 `;
 
-    const gappsDesktop = path.join(appsDir, 'gapps.desktop');
     const suiteDesktop = path.join(appsDir, 'google-suite.desktop');
+    fs.writeFileSync(suiteDesktop, desktopContent, 'utf8');
 
-    fs.writeFileSync(gappsDesktop, desktopContent, 'utf8');
-    fs.writeFileSync(suiteDesktop, desktopContent.replace('StartupWMClass=gapps', 'StartupWMClass=google-suite'), 'utf8');
-
-    // 3. Notify desktop environment / KDE Sycoca
+    // 3. Notify desktop environment
     try {
       const { exec } = require('child_process');
       exec('update-desktop-database ~/.local/share/applications/ 2>/dev/null; kbuildsycoca6 --noincremental 2>/dev/null || kbuildsycoca5 --noincremental 2>/dev/null');
@@ -313,23 +312,28 @@ function manageAutostart(enable) {
   try {
     const home = process.env.HOME || app.getPath('home');
     const autostartDir = path.join(home, '.config', 'autostart');
-    const autostartFile = path.join(autostartDir, 'gapps.desktop');
+    const autostartFile = path.join(autostartDir, 'google-suite.desktop');
+    const legacyFile = path.join(autostartDir, 'gapps.desktop');
 
     if (enable) {
       if (!fs.existsSync(autostartDir)) {
         fs.mkdirSync(autostartDir, { recursive: true });
       }
-      const launcherPath = path.join(__dirname, 'google-suite');
-      const iconPath = path.resolve(ICON_PATH);
+
+      const execCmd = app.isPackaged
+        ? (process.env.APPIMAGE || 'google-suite')
+        : path.join(__dirname, 'google-suite');
+      const iconCmd = app.isPackaged ? 'google-suite' : path.resolve(ICON_PATH);
+
       const desktopContent = `[Desktop Entry]
 Type=Application
 Version=1.0
 Name=Google Suite
-Comment=Google Suite desktop shell for Linux
-Exec=${launcherPath}
-Icon=${iconPath}
+Comment=Google Workspace desktop client for Linux
+Exec=${execCmd}
+Icon=${iconCmd}
 Terminal=false
-StartupWMClass=gapps
+StartupWMClass=google-suite
 StartupNotify=false
 Categories=Network;Office;Chat;
 X-GNOME-Autostart-enabled=true
@@ -337,9 +341,15 @@ X-KDE-autostart-after=panel
 X-KDE-autostart-phase=2
 `;
       fs.writeFileSync(autostartFile, desktopContent, 'utf8');
+      if (fs.existsSync(legacyFile)) {
+        try { fs.unlinkSync(legacyFile); } catch (_) {}
+      }
     } else {
       if (fs.existsSync(autostartFile)) {
         fs.unlinkSync(autostartFile);
+      }
+      if (fs.existsSync(legacyFile)) {
+        try { fs.unlinkSync(legacyFile); } catch (_) {}
       }
     }
   } catch (err) {
@@ -1521,9 +1531,9 @@ app.on('second-instance', (_event, commandLine) => {
 app.whenReady().then(async () => {
   app.setName('Google Suite');
   if (app.setDesktopName) {
-    app.setDesktopName('gapps.desktop');
+    app.setDesktopName('google-suite.desktop');
   }
-  app.setAppUserModelId('gapps');
+  app.setAppUserModelId('com.google.suite.linux');
   ensureDesktopFile();
   loadSettings();
   loadState();

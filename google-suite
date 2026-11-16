@@ -1,18 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ELECTRON="$DIR/node_modules/electron/dist/electron"
 
-# Ensure standard and common user paths are in PATH
-for p in /usr/local/bin /usr/bin /bin "$HOME/.nvm/versions/node"/*"/bin"; do
-  if [ -d "$p" ]; then
-    PATH="$p:$PATH"
-  fi
-done
-export PATH
-
 if [ -x "$ELECTRON" ]; then
   exec "$ELECTRON" "$DIR" --no-sandbox "$@"
-elif command -v npm >/dev/null 2>&1; then
+elif command -v electron &>/dev/null; then
+  exec electron "$DIR" --no-sandbox "$@"
+elif command -v npm &>/dev/null; then
   exec npm start --prefix "$DIR" -- "$@"
 else
   exec npx electron "$DIR" --no-sandbox "$@"
