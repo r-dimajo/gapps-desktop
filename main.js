@@ -15,6 +15,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
 
@@ -29,11 +30,25 @@ if (process.platform === 'linux') {
 // Default application and web services locale to English
 app.commandLine.appendSwitch('lang', 'en-US');
 
-// Single instance lock
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  app.quit();
-  process.exit(0);
+// Allow running an isolated/new instance for testing without conflicting with a background app
+const allowMultiple =
+  process.argv.includes('--new-instance') ||
+  process.argv.includes('--isolated') ||
+  Boolean(process.env.GAPPS_ISOLATED);
+
+if (!allowMultiple) {
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    console.log("\n[Google Suite] Un'altra istanza dell'app e' gia' in esecuzione sul sistema.");
+    console.log("[Google Suite] Il comando e' stato inoltrato alla finestra esistente.");
+    console.log("[Google Suite] Per eseguire un'istanza di test separata (es. dentro Mutter/GNOME):");
+    console.log("               npm start -- --new-instance\n");
+    app.quit();
+    process.exit(0);
+  }
+} else {
+  const testUserData = path.join(os.tmpdir(), `gapps-session-${process.pid}`);
+  app.setPath('userData', testUserData);
 }
 
 const TABBAR_HEIGHT = 36;
@@ -1198,58 +1213,62 @@ function showAndSwitchTo(appId) {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(getTrayIconPath());
-  tray = new Tray(icon);
-  tray.setToolTip('Google Suite');
+  try {
+    const icon = nativeImage.createFromPath(getTrayIconPath());
+    tray = new Tray(icon);
+    tray.setToolTip('Google Suite');
 
-  // Nested submenu with all 11 apps
-  const allAppsSubmenu = APPS.map((app) => {
-    const iconPath = getAppIconPath(app.id);
-    let itemIcon = null;
-    try {
-      const img = nativeImage.createFromPath(iconPath);
-      if (!img.isEmpty()) {
-        itemIcon = img.resize({ width: 16, height: 16 });
+    // Nested submenu with all 11 apps
+    const allAppsSubmenu = APPS.map((app) => {
+      const iconPath = getAppIconPath(app.id);
+      let itemIcon = null;
+      try {
+        const img = nativeImage.createFromPath(iconPath);
+        if (!img.isEmpty()) {
+          itemIcon = img.resize({ width: 16, height: 16 });
+        }
+      } catch (_) {}
+
+      return {
+        label: `${app.title} — ${app.description}`,
+        icon: itemIcon || undefined,
+        click: () => showAndSwitchTo(app.id)
+      };
+    });
+
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show / Hide Google Suite',
+        click: toggleWindow
+      },
+      {
+        label: 'New tab (App grid)...',
+        click: () => {
+          if (!mainWindow.isVisible()) mainWindow.show();
+          mainWindow.focus();
+          openNewTab();
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Google Apps',
+        submenu: allAppsSubmenu
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit Google Suite',
+        click: () => {
+          app.isQuitting = true;
+          app.quit();
+        }
       }
-    } catch (_) {}
+    ]);
 
-    return {
-      label: `${app.title} — ${app.description}`,
-      icon: itemIcon || undefined,
-      click: () => showAndSwitchTo(app.id)
-    };
-  });
-
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show / Hide Google Suite',
-      click: toggleWindow
-    },
-    {
-      label: 'New tab (App grid)...',
-      click: () => {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
-        openNewTab();
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Google Apps',
-      submenu: allAppsSubmenu
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit Google Suite',
-      click: () => {
-        app.isQuitting = true;
-        app.quit();
-      }
-    }
-  ]);
-
-  tray.setContextMenu(contextMenu);
-  tray.on('click', toggleWindow);
+    tray.setContextMenu(contextMenu);
+    tray.on('click', toggleWindow);
+  } catch (err) {
+    console.warn('[Google Suite] System tray not available in this environment:', err.message);
+  }
 }
 
 function handleArgv(argv) {
@@ -1616,9 +1635,16 @@ app.whenReady().then(async () => {
 
   createTray();
 
-  // Show window if not started minimized
-  if (!settings.start_minimized) {
+  // Show window: always show if on GNOME or testing, or if not started minimized
+  const isGnome = getEffectiveTheme() === 'gnome';
+  if (!settings.start_minimized || isGnome || allowMultiple || process.argv.includes('--show')) {
     mainWindow.show();
+    mainWindow.focus();
+  }
+
+  console.log(`[Google Suite] App ready (Theme: ${getEffectiveTheme().toUpperCase()} | Window visible: ${mainWindow.isVisible()})`);
+  if (isGnome) {
+    console.log(`[Google Suite] GNOME Note: GNOME Shell does not display tray icons by default.`);
   }
 
   // Handle CLI args
