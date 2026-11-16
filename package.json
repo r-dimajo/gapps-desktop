@@ -1,14 +1,69 @@
 {
-  "name": "gapps",
+  "name": "google-suite-linux",
   "version": "1.0.0",
   "description": "Google Suite desktop shell for Linux",
   "main": "main.js",
+  "author": "Riccardo Di Majo",
+  "license": "MIT",
+  "homepage": "https://github.com/r-dimajo/google-suite-linux",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r-dimajo/google-suite-linux.git"
+  },
   "scripts": {
     "start": "electron . --no-sandbox",
     "start:gnome": "GTK_THEME=Adwaita:dark electron . --no-sandbox --gnome --new-instance",
-    "install-desktop": "bash tools/install_desktop.sh"
+    "install-desktop": "bash tools/install_desktop.sh",
+    "build:deb": "electron-builder --linux deb",
+    "build:appimage": "electron-builder --linux AppImage",
+    "dist": "electron-builder --linux deb AppImage"
   },
   "devDependencies": {
-    "electron": "^33.2.1"
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.google.suite.linux",
+    "productName": "Google Suite",
+    "executableName": "google-suite",
+    "artifactName": "${name}_${version}_${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "tab-preload.js",
+      "apps.js",
+      "svg-icons.js",
+      "icons/**/*",
+      "tabbar/**/*",
+      "newtab/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "icon": "icons/icon.png",
+      "category": "Network;Office;",
+      "synopsis": "Google Workspace desktop client for Linux",
+      "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)"
+    },
+    "deb": {
+      "packageName": "google-suite-linux",
+      "priority": "optional",
+      "depends": [
+        "libnotify4",
+        "libnss3",
+        "libsecret-1-0",
+        "libasound2 | libasound2t64",
+        "libgbm1"
+      ],
+      "desktop": {
+        "StartupWMClass": "google-suite"
+      }
+    }
   }
 }
