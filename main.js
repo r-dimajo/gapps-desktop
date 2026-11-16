@@ -25,6 +25,17 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('disable-setuid-sandbox');
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer,WaylandWindowDecorations');
+
+  // Enforce Adwaita GTK window decorations (buttons and frame) when in GNOME mode or nested Mutter
+  const isGnome =
+    process.argv.includes('--gnome') ||
+    Boolean(process.env.MUTTER_DEBUG_DUMMY_MODE_SPECS) ||
+    Boolean(process.env.WAYLAND_DISPLAY && process.env.WAYLAND_DISPLAY !== 'wayland-0') ||
+    (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase().includes('gnome');
+
+  if (isGnome && !process.env.GTK_THEME) {
+    process.env.GTK_THEME = 'Adwaita:dark';
+  }
 }
 
 // Default application and web services locale to English

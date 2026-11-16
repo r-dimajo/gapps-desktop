@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron . --no-sandbox",
+    "start:gnome": "GTK_THEME=Adwaita:dark electron . --no-sandbox --gnome --new-instance",
     "install-desktop": "bash tools/install_desktop.sh"
   },
   "devDependencies": {
