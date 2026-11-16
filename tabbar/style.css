@@ -191,6 +191,33 @@ html, body {
   color: #fff;
 }
 
+.tab .lock-btn {
+  border: none;
+  background: none;
+  color: var(--fg-dim);
+  width: 16px;
+  height: 16px;
+  padding: 1px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.tab .lock-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--accent);
+}
+
+.tab.pinned .lock-btn {
+  display: none;
+}
+
 button {
   background: none;
   border: none;

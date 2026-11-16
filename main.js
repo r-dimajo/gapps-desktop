@@ -52,7 +52,7 @@ let state = {
 };
 
 let settings = {
-  open_at_startup: false,
+  open_at_startup: true,
   start_minimized: false,
   memory_saver: true
 };
@@ -78,7 +78,7 @@ async function ensureAppIcons() {
     const keysToGenerate = [];
 
     for (const [key, svg] of Object.entries(ICONS)) {
-      if (['audio', 'muted', 'pin', 'newtab'].includes(key)) continue;
+      if (['audio', 'muted', 'pin', 'newtab', 'lock'].includes(key)) continue;
       const pngPath = path.join(ICONS_DIR, `${key}.png`);
       const hash = crypto.createHash('md5').update(svg).digest('hex');
       if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 200 || meta[key] !== hash) {
@@ -175,6 +175,7 @@ function ensureDesktopFile() {
     const targetIconPath = path.join(iconsDir, 'gapps.png');
     const targetIconPathSuite = path.join(iconsDir, 'google-suite.png');
     const sourceIcon = path.resolve(ICON_PATH);
+    const launcherPath = path.join(__dirname, 'google-suite');
 
     // 1. Install hicolor icon for both gapps and google-suite
     try {
@@ -191,12 +192,13 @@ function ensureDesktopFile() {
     }
 
     const desktopContent = `[Desktop Entry]
+Type=Application
+Version=1.0
 Name=Google Suite
 Comment=Google Suite desktop shell for Linux
-Exec=npm start --prefix ${path.resolve(__dirname)}
+Exec=${launcherPath}
 Icon=${sourceIcon}
 Terminal=false
-Type=Application
 StartupWMClass=gapps
 StartupNotify=true
 Categories=Network;Office;Chat;
@@ -218,6 +220,45 @@ Categories=Network;Office;Chat;
   }
 }
 
+function manageAutostart(enable) {
+  if (process.platform !== 'linux') return;
+  try {
+    const home = process.env.HOME || app.getPath('home');
+    const autostartDir = path.join(home, '.config', 'autostart');
+    const autostartFile = path.join(autostartDir, 'gapps.desktop');
+
+    if (enable) {
+      if (!fs.existsSync(autostartDir)) {
+        fs.mkdirSync(autostartDir, { recursive: true });
+      }
+      const launcherPath = path.join(__dirname, 'google-suite');
+      const iconPath = path.resolve(ICON_PATH);
+      const desktopContent = `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Google Suite
+Comment=Google Suite desktop shell for Linux
+Exec=${launcherPath}
+Icon=${iconPath}
+Terminal=false
+StartupWMClass=gapps
+StartupNotify=false
+Categories=Network;Office;Chat;
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
+X-KDE-autostart-phase=2
+`;
+      fs.writeFileSync(autostartFile, desktopContent, 'utf8');
+    } else {
+      if (fs.existsSync(autostartFile)) {
+        fs.unlinkSync(autostartFile);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not manage autostart entry:', err);
+  }
+}
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -227,6 +268,7 @@ function loadSettings() {
   } catch (err) {
     console.error('Failed to load settings:', err);
   }
+  manageAutostart(settings.open_at_startup !== false);
 }
 
 function saveSettings() {
@@ -246,6 +288,7 @@ function loadState() {
         state.tabs = data.tabs.map((t) => ({
           ...t,
           pinned: Boolean(t.pinned),
+          locked: t.locked !== undefined ? Boolean(t.locked) : ['gmail', 'chat', 'calendar'].includes(t.app),
           unreadCount: 0,
           isAudible: false,
           isMuted: false,
@@ -269,6 +312,7 @@ function loadState() {
       title: defaultApp.title,
       url: defaultApp.url,
       pinned: false,
+      locked: true,
       unreadCount: 0,
       isAudible: false,
       isMuted: false,
@@ -293,7 +337,8 @@ function saveState() {
               app: t.app,
               title: t.title,
               url: t.url,
-              pinned: Boolean(t.pinned)
+              pinned: Boolean(t.pinned),
+              locked: Boolean(t.locked)
             })),
             active: state.active
           },
@@ -317,6 +362,7 @@ function broadcastState() {
         title: t.title,
         url: t.url,
         pinned: Boolean(t.pinned),
+        locked: Boolean(t.locked),
         unreadCount: t.unreadCount || 0,
         hasNotification: Boolean(t.hasNotification),
         isAudible: Boolean(t.isAudible),
@@ -564,18 +610,21 @@ function createTabView(tab) {
   return view;
 }
 
-function createTab(url = null, appId = null, activate = true, pinned = false) {
+function createTab(url = null, appId = null, activate = true, pinned = false, locked = null) {
   const isNewTab = !url && !appId;
   const targetUrl = isNewTab ? NEW_TAB_URL : (url || (byId(appId) ? byId(appId).url : NEW_TAB_URL));
   const appDef = appId ? byId(appId) : (detectApp(targetUrl) || null);
+  const detectedAppId = isNewTab ? 'newtab' : (appDef ? appDef.id : 'web');
+  const isLocked = locked !== null ? Boolean(locked) : ['gmail', 'chat', 'calendar'].includes(detectedAppId);
 
   const tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   const tab = {
     id: tabId,
-    app: isNewTab ? 'newtab' : (appDef ? appDef.id : 'web'),
+    app: detectedAppId,
     title: isNewTab ? 'Nuova scheda' : (appDef ? appDef.title : 'Google'),
     url: targetUrl,
     pinned: Boolean(pinned),
+    locked: isLocked,
     unreadCount: 0,
     isAudible: false,
     isMuted: false,
@@ -694,6 +743,9 @@ function activateTab(tabId) {
 }
 
 function closeTab(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab || tab.pinned || tab.locked) return;
+
   const index = state.tabs.findIndex((t) => t.id === tabId);
   if (index === -1) return;
 
@@ -725,6 +777,14 @@ function closeTab(tabId) {
     saveState();
     broadcastState();
   }
+}
+
+function toggleLockTab(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  tab.locked = !tab.locked;
+  saveState();
+  broadcastState();
 }
 
 function togglePinTab(tabId) {
@@ -773,6 +833,10 @@ function showTabMenu(tabId) {
 
   const template = [
     {
+      label: tab.locked ? '🔓 Sblocca scheda (Consenti chiusura)' : '🔒 Blocca scheda (Impedisci chiusura)',
+      click: () => toggleLockTab(tabId)
+    },
+    {
       label: tab.pinned ? 'Separa scheda (Unpin)' : 'Fissa scheda (Pin)',
       click: () => togglePinTab(tabId)
     },
@@ -786,7 +850,7 @@ function showTabMenu(tabId) {
       label: 'Apri nel browser predefinito',
       click: () => {
         shell.openExternal(tab.url);
-        if (!tab.pinned) closeTab(tabId);
+        if (!tab.pinned && !tab.locked) closeTab(tabId);
       }
     },
     {
@@ -804,14 +868,14 @@ function showTabMenu(tabId) {
     { type: 'separator' },
     {
       label: 'Chiudi scheda',
-      enabled: !tab.pinned,
+      enabled: !tab.pinned && !tab.locked,
       click: () => closeTab(tabId)
     },
     {
       label: 'Chiudi le altre schede',
-      enabled: state.tabs.filter((t) => !t.pinned).length > 1,
+      enabled: state.tabs.filter((t) => !t.pinned && !t.locked).length > 1,
       click: () => {
-        const toClose = state.tabs.filter((t) => t.id !== tabId && !t.pinned).map((t) => t.id);
+        const toClose = state.tabs.filter((t) => t.id !== tabId && !t.pinned && !t.locked).map((t) => t.id);
         toClose.forEach((id) => closeTab(id));
       }
     }
@@ -830,9 +894,12 @@ function showSettingsMenu() {
       click: (item) => {
         settings.open_at_startup = item.checked;
         saveSettings();
-        app.setLoginItemSettings({
-          openAtLogin: settings.open_at_startup
-        });
+        manageAutostart(settings.open_at_startup);
+        try {
+          app.setLoginItemSettings({
+            openAtLogin: settings.open_at_startup
+          });
+        } catch (_) {}
       }
     },
     {
@@ -1009,6 +1076,7 @@ setInterval(() => {
     if (
       tab.id !== state.active &&
       !tab.pinned &&
+      !tab.locked &&
       !tab.isAudible &&
       !NEVER_HIBERNATE.includes(tab.app) &&
       tabViews.has(tab.id) &&
@@ -1035,6 +1103,7 @@ ipcMain.handle('get-state', () => ({
     title: t.title,
     url: t.url,
     pinned: Boolean(t.pinned),
+    locked: Boolean(t.locked),
     unreadCount: t.unreadCount || 0,
     isAudible: Boolean(t.isAudible),
     isMuted: Boolean(t.isMuted)
@@ -1050,6 +1119,7 @@ ipcMain.handle('navigate-current-tab', (_event, { url, appId }) =>
 );
 ipcMain.handle('activate-tab', (_event, id) => activateTab(id));
 ipcMain.handle('close-tab', (_event, id) => closeTab(id));
+ipcMain.handle('toggle-lock-tab', (_event, id) => toggleLockTab(id));
 ipcMain.handle('toggle-pin-tab', (_event, id) => togglePinTab(id));
 ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
 

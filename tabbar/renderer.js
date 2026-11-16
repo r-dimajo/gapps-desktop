@@ -21,8 +21,8 @@ function render(state) {
     const appDef = apps.find((a) => a.id === tab.app);
 
     const el = document.createElement("div");
-    el.className = "tab" + (tab.id === active ? " active" : "") + (tab.pinned ? " pinned" : "");
-    el.title = `${tab.title || "Scheda"} (${index + 1})${tab.pinned ? " [Fissata]" : ""}`;
+    el.className = "tab" + (tab.id === active ? " active" : "") + (tab.pinned ? " pinned" : "") + (tab.locked ? " locked" : "");
+    el.title = `${tab.title || "Scheda"} (${index + 1})${tab.locked ? " [Bloccata]" : ""}${tab.pinned ? " [Fissata]" : ""}`;
     el.dataset.id = tab.id;
 
     // Drag and drop reordering
@@ -108,8 +108,19 @@ function render(state) {
       el.appendChild(audioBtn);
     }
 
-    // Close button (only for non-pinned tabs)
-    if (!tab.pinned) {
+    // Lock indicator or Close button
+    if (tab.locked) {
+      const lockBtn = document.createElement("button");
+      lockBtn.className = "lock-btn";
+      lockBtn.title = "Scheda bloccata contro chiusura accidentale (Clicca per sbloccare)";
+      lockBtn.innerHTML = typeof ICONS !== "undefined" && ICONS.lock ? ICONS.lock : "🔒";
+      lockBtn.setAttribute("draggable", "false");
+      lockBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        window.gapps.toggleLockTab(tab.id);
+      });
+      el.appendChild(lockBtn);
+    } else if (!tab.pinned) {
       const closeBtn = document.createElement("button");
       closeBtn.className = "x";
       closeBtn.title = "Chiudi scheda (Ctrl+W)";
@@ -127,9 +138,9 @@ function render(state) {
       window.gapps.activateTab(tab.id);
     });
 
-    // Middle click closes tab (if not pinned)
+    // Middle click closes tab (if not pinned and not locked)
     el.addEventListener("auxclick", (e) => {
-      if (e.button === 1 && !tab.pinned) {
+      if (e.button === 1 && !tab.pinned && !tab.locked) {
         e.preventDefault();
         window.gapps.closeTab(tab.id);
       }
@@ -183,7 +194,7 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (currentState && currentState.active) {
       const current = currentState.tabs.find((t) => t.id === currentState.active);
-      if (current && !current.pinned) {
+      if (current && !current.pinned && !current.locked) {
         window.gapps.closeTab(currentState.active);
       }
     }

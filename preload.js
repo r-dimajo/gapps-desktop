@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('gapps', {
   openNewTab: () => ipcRenderer.invoke('open-new-tab'),
   navigateCurrentTab: (url, appId) =>
     ipcRenderer.invoke('navigate-current-tab', { url, appId }),
+  toggleLockTab: (id) => ipcRenderer.invoke('toggle-lock-tab', id),
   togglePinTab: (id) => ipcRenderer.invoke('toggle-pin-tab', id),
   toggleMuteTab: (id) => ipcRenderer.invoke('toggle-mute-tab', id),
   reloadActive: () => ipcRenderer.invoke('reload-active'),
