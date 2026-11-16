@@ -59,11 +59,47 @@ let settings = {
   open_at_startup: true,
   start_minimized: false,
   memory_saver: true,
-  tab_layout: 'horizontal' // 'horizontal' | 'vertical'
+  tab_layout: 'horizontal', // 'horizontal' | 'vertical'
+  desktop_theme: 'auto', // 'auto' | 'gnome' | 'kde'
+  close_action: 'tray' // 'tray' | 'quit'
 };
 
 function isVerticalTabs() {
   return settings.tab_layout === 'vertical';
+}
+
+function getDesktopEnvironment() {
+  const de = (
+    process.env.XDG_CURRENT_DESKTOP ||
+    process.env.DESKTOP_SESSION ||
+    process.env.GDMSESSION ||
+    ''
+  ).toLowerCase();
+  if (de.includes('gnome') || de.includes('unity') || de.includes('pantheon')) {
+    return 'gnome';
+  }
+  return 'kde';
+}
+
+let cliThemeOverride = null;
+if (process.argv.includes('--gnome')) {
+  cliThemeOverride = 'gnome';
+} else if (process.argv.includes('--kde')) {
+  cliThemeOverride = 'kde';
+}
+
+function getEffectiveTheme() {
+  if (cliThemeOverride) return cliThemeOverride;
+  if (settings.desktop_theme && settings.desktop_theme !== 'auto') {
+    return settings.desktop_theme;
+  }
+  return getDesktopEnvironment();
+}
+
+function setDesktopTheme(theme) {
+  settings.desktop_theme = theme;
+  saveSettings();
+  broadcastState();
 }
 
 // Map of tabId -> WebContentsView
@@ -379,7 +415,8 @@ function broadcastState() {
       })),
       active: state.active,
       apps: APPS,
-      layout: settings.tab_layout || 'horizontal'
+      layout: settings.tab_layout || 'horizontal',
+      theme: getEffectiveTheme()
     });
   }
 }
@@ -993,6 +1030,7 @@ function toggleTabLayout() {
 }
 
 function showSettingsMenu() {
+  const detected = getDesktopEnvironment() === 'gnome' ? 'GNOME' : 'KDE Plasma';
   const template = [
     {
       label: 'Tab layout',
@@ -1008,6 +1046,52 @@ function showSettingsMenu() {
           type: 'radio',
           checked: settings.tab_layout === 'vertical',
           click: () => setTabLayout('vertical')
+        }
+      ]
+    },
+    {
+      label: 'Desktop theme',
+      submenu: [
+        {
+          label: `Auto-detect (${detected})`,
+          type: 'radio',
+          checked: !settings.desktop_theme || settings.desktop_theme === 'auto',
+          click: () => setDesktopTheme('auto')
+        },
+        {
+          label: 'GNOME (Libadwaita)',
+          type: 'radio',
+          checked: settings.desktop_theme === 'gnome',
+          click: () => setDesktopTheme('gnome')
+        },
+        {
+          label: 'KDE Plasma (Breeze)',
+          type: 'radio',
+          checked: settings.desktop_theme === 'kde',
+          click: () => setDesktopTheme('kde')
+        }
+      ]
+    },
+    {
+      label: 'On window close',
+      submenu: [
+        {
+          label: 'Keep running in background (Tray / Dock)',
+          type: 'radio',
+          checked: settings.close_action !== 'quit',
+          click: () => {
+            settings.close_action = 'tray';
+            saveSettings();
+          }
+        },
+        {
+          label: 'Quit application',
+          type: 'radio',
+          checked: settings.close_action === 'quit',
+          click: () => {
+            settings.close_action = 'quit';
+            saveSettings();
+          }
         }
       ]
     },
@@ -1236,7 +1320,8 @@ ipcMain.handle('get-state', () => ({
   })),
   active: state.active,
   apps: APPS,
-  layout: settings.tab_layout || 'horizontal'
+  layout: settings.tab_layout || 'horizontal',
+  theme: getEffectiveTheme()
 }));
 
 ipcMain.handle('get-apps', () => APPS);
@@ -1251,6 +1336,7 @@ ipcMain.handle('toggle-pin-tab', (_event, id) => togglePinTab(id));
 ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
 ipcMain.handle('set-tab-layout', (_event, layout) => setTabLayout(layout));
 ipcMain.handle('toggle-tab-layout', () => toggleTabLayout());
+ipcMain.handle('set-desktop-theme', (_event, theme) => setDesktopTheme(theme));
 
 ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
   const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);
@@ -1515,9 +1601,14 @@ app.whenReady().then(async () => {
     }
   });
 
-  // Close to tray behavior
+  // Close to tray / quit behavior
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
+      if (settings.close_action === 'quit') {
+        app.isQuitting = true;
+        app.quit();
+        return;
+      }
       event.preventDefault();
       mainWindow.hide();
     }

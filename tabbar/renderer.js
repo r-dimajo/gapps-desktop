@@ -17,6 +17,12 @@ function render(state) {
   document.documentElement.classList.toggle("vertical", isVertical);
   document.body.classList.toggle("vertical", isVertical);
 
+  const theme = state.theme || "kde";
+  document.documentElement.classList.toggle("theme-gnome", theme === "gnome");
+  document.documentElement.classList.toggle("theme-kde", theme === "kde");
+  document.body.classList.toggle("theme-gnome", theme === "gnome");
+  document.body.classList.toggle("theme-kde", theme === "kde");
+
   // Set toggle buttons & brand icons from SVG definitions
   const topToggle = $("toggle-layout-top");
   if (topToggle && typeof ICONS !== "undefined" && ICONS.layoutHorizontal) {

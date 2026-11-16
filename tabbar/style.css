@@ -510,3 +510,120 @@ html.vertical #controls button {
   align-items: center;
   justify-content: center;
 }
+
+/* ========================================================
+   Desktop Themes: GNOME (Libadwaita) & KDE (Breeze)
+   ======================================================== */
+
+html.theme-gnome, html.theme-gnome body {
+  --bg: #242424;
+  --bg-tab: #2f2f2f;
+  --bg-tab-hover: #383838;
+  --bg-active: #444444;
+  --fg: #ffffff;
+  --fg-dim: #9a9996;
+  --accent: #3584e4; /* GNOME Adwaita Blue */
+  --border: #1d1d1d;
+  --badge-bg: #e01b24; /* GNOME Red */
+  --badge-fg: #ffffff;
+  font-family: Cantarell, "Ubuntu", -apple-system, sans-serif;
+}
+
+/* Horizontal mode in GNOME */
+html.theme-gnome #strip {
+  padding: 3px 6px;
+  gap: 3px;
+}
+
+html.theme-gnome .tab {
+  height: 30px;
+  border-radius: 6px;
+  border-right: none;
+  margin: 0 1px;
+}
+
+html.theme-gnome .tab:hover {
+  background: var(--bg-tab-hover);
+}
+
+html.theme-gnome .tab.active {
+  background: var(--bg-active);
+  border-bottom: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+html.theme-gnome .tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+html.theme-gnome .tab.pinned {
+  min-width: 40px;
+  max-width: 40px;
+}
+
+html.theme-gnome .icon-btn,
+html.theme-gnome button {
+  height: 30px;
+  border-radius: 6px;
+}
+
+html.theme-gnome #new {
+  height: 30px;
+  border-radius: 6px;
+}
+
+html.theme-gnome .tab .x:hover {
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Vertical Sidebar mode in GNOME */
+html.vertical.theme-gnome #strip {
+  padding: 0;
+  background: #202020;
+}
+
+html.vertical.theme-gnome .tab {
+  border-radius: 6px;
+  margin: 2px 8px;
+  height: 34px;
+}
+
+html.vertical.theme-gnome .tab.active {
+  background: rgba(53, 132, 228, 0.2);
+  border-left: none;
+}
+
+html.vertical.theme-gnome .tab.active::after {
+  display: none;
+}
+
+html.vertical.theme-gnome .tab.active .title {
+  color: #78aeed;
+  font-weight: 600;
+}
+
+html.vertical.theme-gnome #sidebar-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* KDE Plasma (Breeze) Theme */
+html.theme-kde, html.theme-kde body {
+  --bg: #1e2022;
+  --bg-tab: #272a2e;
+  --bg-tab-hover: #31363b;
+  --bg-active: #3a3f45;
+  --fg: #eff0f1;
+  --fg-dim: #bdc3c7;
+  --accent: #3daee9; /* Breeze Blue */
+  --border: #141618;
+  --badge-bg: #ed1515;
+  font-family: "Noto Sans", sans-serif;
+}
