@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Google Suite desktop shell for Linux",
   "main": "main.js",
-  "author": "Riccardo Di Majo",
+  "author": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
   "license": "MIT",
   "homepage": "https://github.com/r-dimajo/google-suite-linux",
   "repository": {
@@ -42,6 +42,7 @@
       "package.json"
     ],
     "linux": {
+      "maintainer": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
       "target": [
         "deb",
         "AppImage"
@@ -53,6 +54,7 @@
     },
     "deb": {
       "packageName": "google-suite-linux",
+      "maintainer": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
       "priority": "optional",
       "depends": [
         "libnotify4",
