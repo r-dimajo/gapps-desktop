@@ -26,6 +26,9 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer,WaylandWindowDecorations');
 }
 
+// Default application and web services locale to English
+app.commandLine.appendSwitch('lang', 'en-US');
+
 // Single instance lock
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -390,7 +393,7 @@ function updateAppBadge() {
     app.setBadgeCount(totalUnread);
   }
   if (tray) {
-    tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} non lette)` : 'Google Suite');
+    tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} unread)` : 'Google Suite');
     const trayIconPath = totalUnread > 0 ? getTrayBadgedIconPath() : getTrayIconPath();
     try {
       tray.setImage(nativeImage.createFromPath(trayIconPath));
@@ -619,7 +622,7 @@ function createTabView(tab) {
     tab.url = url;
     if (url.startsWith('file://')) {
       tab.app = 'newtab';
-      tab.title = 'Nuova scheda';
+      tab.title = 'New Tab';
     } else {
       const detected = detectApp(url);
       if (detected && detected.id !== tab.app) {
@@ -683,7 +686,7 @@ function createTab(url = null, appId = null, activate = true, pinned = false, lo
   const tab = {
     id: tabId,
     app: detectedAppId,
-    title: isNewTab ? 'Nuova scheda' : (appDef ? appDef.title : 'Google'),
+    title: isNewTab ? 'New Tab' : (appDef ? appDef.title : 'Google'),
     url: targetUrl,
     pinned: Boolean(pinned),
     locked: isLocked,
@@ -732,7 +735,7 @@ function navigateCurrentTab(url, appId = null) {
   const appDef = appId ? byId(appId) : (detectApp(targetUrl) || null);
   tab.url = targetUrl;
   tab.app = appDef ? appDef.id : (tab.app !== 'newtab' ? tab.app : 'web');
-  tab.title = appDef ? appDef.title : 'Caricamento...';
+  tab.title = appDef ? appDef.title : 'Loading...';
   tab.lastAccessed = Date.now();
 
   let view = tabViews.get(tab.id);
@@ -901,28 +904,28 @@ function showTabMenu(tabId) {
 
   const template = [
     {
-      label: tab.locked ? '🔓 Sblocca scheda (Consenti chiusura)' : '🔒 Blocca scheda (Impedisci chiusura)',
+      label: tab.locked ? '🔓 Unlock tab (Allow closing)' : '🔒 Lock tab (Prevent accidental closing)',
       click: () => toggleLockTab(tabId)
     },
     {
-      label: tab.pinned ? 'Separa scheda (Unpin)' : 'Fissa scheda (Pin)',
+      label: tab.pinned ? 'Unpin tab' : 'Pin tab',
       click: () => togglePinTab(tabId)
     },
     {
-      label: tab.isMuted ? 'Riattiva audio scheda' : 'Disattiva audio scheda',
+      label: tab.isMuted ? 'Unmute tab audio' : 'Mute tab audio',
       enabled: Boolean(tab.isAudible || tab.isMuted),
       click: () => toggleMuteTab(tabId)
     },
     { type: 'separator' },
     {
-      label: 'Apri nel browser predefinito',
+      label: 'Open in default browser',
       click: () => {
         shell.openExternal(tab.url);
         if (!tab.pinned && !tab.locked) closeTab(tabId);
       }
     },
     {
-      label: 'Ricarica scheda',
+      label: 'Reload tab',
       click: () => {
         if (tabViews.has(tabId)) {
           tabViews.get(tabId).webContents.reload();
@@ -930,22 +933,22 @@ function showTabMenu(tabId) {
       }
     },
     {
-      label: 'Duplica scheda',
+      label: 'Duplicate tab',
       click: () => createTab(tab.url, tab.app, true)
     },
     { type: 'separator' },
     {
-      label: settings.tab_layout === 'vertical' ? 'Sposta schede in alto (Orizzontale)' : 'Sposta schede di lato (Verticale)',
+      label: settings.tab_layout === 'vertical' ? 'Switch to top tabs (Horizontal)' : 'Switch to side tabs (Vertical)',
       click: () => toggleTabLayout()
     },
     { type: 'separator' },
     {
-      label: 'Chiudi scheda',
+      label: 'Close tab',
       enabled: !tab.pinned && !tab.locked,
       click: () => closeTab(tabId)
     },
     {
-      label: 'Chiudi le altre schede',
+      label: 'Close other tabs',
       enabled: state.tabs.filter((t) => !t.pinned && !t.locked).length > 1,
       click: () => {
         const toClose = state.tabs.filter((t) => t.id !== tabId && !t.pinned && !t.locked).map((t) => t.id);
@@ -972,16 +975,16 @@ function toggleTabLayout() {
 function showSettingsMenu() {
   const template = [
     {
-      label: 'Disposizione schede',
+      label: 'Tab layout',
       submenu: [
         {
-          label: 'In alto (Orizzontale)',
+          label: 'Top (Horizontal)',
           type: 'radio',
           checked: settings.tab_layout !== 'vertical',
           click: () => setTabLayout('horizontal')
         },
         {
-          label: 'Di lato (Verticale)',
+          label: 'Side (Vertical)',
           type: 'radio',
           checked: settings.tab_layout === 'vertical',
           click: () => setTabLayout('vertical')
@@ -990,7 +993,7 @@ function showSettingsMenu() {
     },
     { type: 'separator' },
     {
-      label: "Avvia all'avvio del sistema",
+      label: 'Launch at startup',
       type: 'checkbox',
       checked: settings.open_at_startup,
       click: (item) => {
@@ -1005,7 +1008,7 @@ function showSettingsMenu() {
       }
     },
     {
-      label: 'Avvia ridotto a icona',
+      label: 'Start minimized to tray',
       type: 'checkbox',
       checked: settings.start_minimized,
       click: (item) => {
@@ -1014,7 +1017,7 @@ function showSettingsMenu() {
       }
     },
     {
-      label: 'Risparmio memoria (sospendi schede inattive)',
+      label: 'Memory Saver (suspend inactive background tabs)',
       type: 'checkbox',
       checked: settings.memory_saver,
       click: (item) => {
@@ -1024,38 +1027,38 @@ function showSettingsMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Test notifica Google Chat...',
+      label: 'Test Google Chat notification...',
       click: () => {
-        triggerNotificationForApp('chat', 'Mario Rossi', 'Ciao! Notifica di prova Google Chat con timer KDE.');
+        triggerNotificationForApp('chat', 'Alex Miller', 'Hello! Test notification for Google Chat.');
       }
     },
     {
-      label: 'Test notifica Gmail...',
+      label: 'Test Gmail notification...',
       click: () => {
-        triggerNotificationForApp('gmail', 'Google Suite Team', 'Notifica di prova Gmail con timer KDE.');
+        triggerNotificationForApp('gmail', 'Google Suite Team', 'Test notification for Gmail.');
       }
     },
     {
-      label: 'Test notifica Google Gemini...',
+      label: 'Test Google Gemini notification...',
       click: () => {
-        triggerNotificationForApp('gemini', 'Google Gemini', 'Notifica di prova con stella Gemini e timer KDE.');
+        triggerNotificationForApp('gemini', 'Google Gemini', 'Test notification with Gemini star.');
       }
     },
     {
-      label: 'Cancella cache...',
+      label: 'Clear cache...',
       click: async () => {
         await session.defaultSession.clearCache();
         dialog.showMessageBox(mainWindow, {
           type: 'info',
           title: 'Cache',
-          message: 'Cache svuotata con successo.',
+          message: 'Cache cleared successfully.',
           buttons: ['OK']
         });
       }
     },
     { type: 'separator' },
     {
-      label: 'Esci',
+      label: 'Quit Google Suite',
       click: () => {
         app.isQuitting = true;
         app.quit();
@@ -1115,11 +1118,11 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Mostra / Nascondi Google Suite',
+      label: 'Show / Hide Google Suite',
       click: toggleWindow
     },
     {
-      label: 'Nuova scheda (Griglia app)...',
+      label: 'New tab (App grid)...',
       click: () => {
         if (!mainWindow.isVisible()) mainWindow.show();
         mainWindow.focus();
@@ -1128,12 +1131,12 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Applicazioni Google',
+      label: 'Google Apps',
       submenu: allAppsSubmenu
     },
     { type: 'separator' },
     {
-      label: 'Esci',
+      label: 'Quit Google Suite',
       click: () => {
         app.isQuitting = true;
         app.quit();
@@ -1341,7 +1344,16 @@ app.whenReady().then(async () => {
   // Strip Electron identifier from User-Agent so Google accounts & services don't block login
   const defaultUa = session.defaultSession.getUserAgent();
   const cleanUa = defaultUa.replace(/Electron\/\S+\s?/, '').replace(/gapps\/\S+\s?/, '');
-  session.defaultSession.setUserAgent(cleanUa);
+  session.defaultSession.setUserAgent(cleanUa, 'en-US,en;q=0.9');
+
+  // Default to English language for Google Workspace web services
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = { ...details.requestHeaders };
+    if (!headers['Accept-Language']) {
+      headers['Accept-Language'] = 'en-US,en;q=0.9';
+    }
+    callback({ requestHeaders: headers });
+  });
 
   // Grant Meet & Google Suite permissions automatically
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {

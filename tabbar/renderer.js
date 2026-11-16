@@ -41,7 +41,7 @@ function render(state) {
 
     const el = document.createElement("div");
     el.className = "tab" + (tab.id === active ? " active" : "") + (tab.pinned ? " pinned" : "") + (tab.locked ? " locked" : "");
-    el.title = `${tab.title || "Scheda"} (${index + 1})${tab.locked ? " [Bloccata]" : ""}${tab.pinned ? " [Fissata]" : ""}`;
+    el.title = `${tab.title || "Tab"} (${index + 1})${tab.locked ? " [Locked]" : ""}${tab.pinned ? " [Pinned]" : ""}`;
     el.dataset.id = tab.id;
 
     // Drag and drop reordering
@@ -103,7 +103,7 @@ function render(state) {
     // Title
     const title = document.createElement("span");
     title.className = "title";
-    title.textContent = tab.title || (appDef ? appDef.title : "Nuova scheda");
+    title.textContent = tab.title || (appDef ? appDef.title : "New Tab");
     el.appendChild(title);
 
     // Unread count badge / dot
@@ -122,7 +122,7 @@ function render(state) {
     if (tab.isAudible) {
       const audioBtn = document.createElement("button");
       audioBtn.className = "audio-btn";
-      audioBtn.title = tab.isMuted ? "Riattiva audio scheda" : "Disattiva audio scheda";
+      audioBtn.title = tab.isMuted ? "Unmute tab audio" : "Mute tab audio";
       audioBtn.innerHTML = typeof ICONS !== "undefined" ? (tab.isMuted ? ICONS.muted : ICONS.audio) : "🔊";
       audioBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -135,7 +135,7 @@ function render(state) {
     if (tab.locked) {
       const lockBtn = document.createElement("button");
       lockBtn.className = "lock-btn";
-      lockBtn.title = "Scheda bloccata contro chiusura accidentale (Clicca per sbloccare)";
+      lockBtn.title = "Locked tab against accidental closure (Click to unlock)";
       lockBtn.innerHTML = typeof ICONS !== "undefined" && ICONS.lock ? ICONS.lock : "🔒";
       lockBtn.setAttribute("draggable", "false");
       lockBtn.addEventListener("click", (e) => {
@@ -146,7 +146,7 @@ function render(state) {
     } else if (!tab.pinned) {
       const closeBtn = document.createElement("button");
       closeBtn.className = "x";
-      closeBtn.title = "Chiudi scheda (Ctrl+W)";
+      closeBtn.title = "Close tab (Ctrl+W)";
       closeBtn.innerHTML = "&#10005;";
       closeBtn.setAttribute("draggable", "false");
 

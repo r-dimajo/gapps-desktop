@@ -21,7 +21,7 @@ function renderGrid(apps) {
   apps.forEach((app, index) => {
     const card = document.createElement("div");
     card.className = "app-card";
-    card.title = `${app.title} (Premi ${index < 9 ? index + 1 : "0"})`;
+    card.title = `${app.title} (Press ${index < 9 ? index + 1 : "0"})`;
 
     const iconHtml = (typeof ICONS !== "undefined" && ICONS[app.id]) || "";
 
