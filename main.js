@@ -84,6 +84,23 @@ function isVerticalTabs() {
 }
 
 function getDesktopEnvironment() {
+  // If running inside nested mutter/gnome-shell devkit
+  if (
+    process.env.MUTTER_DEBUG_DUMMY_MODE_SPECS ||
+    process.env.GNOME_SETUP_DISPLAY
+  ) {
+    return 'gnome';
+  }
+
+  // If running on a nested Wayland display (e.g. wayland-1) under gnome-shell
+  if (process.env.WAYLAND_DISPLAY && process.env.WAYLAND_DISPLAY !== 'wayland-0') {
+    try {
+      const { execSync } = require('child_process');
+      const isGnome = execSync('pgrep -x gnome-shell || true', { encoding: 'utf8' }).trim();
+      if (isGnome) return 'gnome';
+    } catch (_) {}
+  }
+
   const de = (
     process.env.XDG_CURRENT_DESKTOP ||
     process.env.DESKTOP_SESSION ||
