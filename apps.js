@@ -33,24 +33,54 @@ function detectApp(url) {
   return null;
 }
 
+function unwrapGoogleUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  try {
+    if (!url.includes('://')) return url;
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const isGoogleHost =
+      host === 'google.com' ||
+      host.endsWith('.google.com') ||
+      host === 'googleadservices.com' ||
+      host.endsWith('.googleadservices.com') ||
+      host.includes('doubleclick.net');
+
+    if (isGoogleHost) {
+      if (u.pathname === '/url') {
+        const target = u.searchParams.get('q') || u.searchParams.get('url');
+        if (target) return unwrapGoogleUrl(target);
+      }
+      const adUrl = u.searchParams.get('adurl');
+      if (adUrl) return unwrapGoogleUrl(adUrl);
+    }
+  } catch (_) {}
+  return url;
+}
+
 function isInternal(urlOrHost) {
   if (!urlOrHost) return false;
-  let host = urlOrHost;
+  let target = urlOrHost;
   try {
-    if (urlOrHost.includes("://")) {
-      host = new URL(urlOrHost).hostname;
+    target = unwrapGoogleUrl(urlOrHost);
+  } catch (_) {}
+
+  let host = target;
+  try {
+    if (target.includes('://')) {
+      host = new URL(target).hostname;
     }
   } catch (_) {}
   host = host.toLowerCase();
   return (
-    host === "google.com" ||
-    host.endsWith(".google.com") ||
-    host === "googlemail.com" ||
-    host.endsWith(".googlemail.com") ||
-    host.endsWith(".googleusercontent.com") ||
-    host.endsWith(".gstatic.com") ||
-    urlOrHost.startsWith("file://")
+    host === 'google.com' ||
+    host.endsWith('.google.com') ||
+    host === 'googlemail.com' ||
+    host.endsWith('.googlemail.com') ||
+    host.endsWith('.googleusercontent.com') ||
+    host.endsWith('.gstatic.com') ||
+    target.startsWith('file://')
   );
 }
 
-module.exports = { APPS, byId, byHost, detectApp, isInternal };
+module.exports = { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl };

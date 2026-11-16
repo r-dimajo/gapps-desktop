@@ -16,7 +16,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { APPS, byId, byHost, detectApp, isInternal } = require('./apps');
+const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
 
 // Linux Wayland, sandbox, and WebRTC PipeWire hardware flags
 if (process.platform === 'linux') {
@@ -576,20 +576,43 @@ function createTabView(tab) {
   // Link interception: internal Google URLs open inside the shell as tabs;
   // external URLs open in default system browser
   view.webContents.setWindowOpenHandler(({ url }) => {
-    if (isInternal(url)) {
-      createTab(url, null, true);
+    if (!url || url === 'about:blank') {
       return { action: 'deny' };
     }
-    shell.openExternal(url);
+    const targetUrl = unwrapGoogleUrl(url);
+    if (isInternal(targetUrl)) {
+      createTab(targetUrl, null, true);
+      return { action: 'deny' };
+    }
+    shell.openExternal(targetUrl);
     return { action: 'deny' };
   });
 
-  view.webContents.on('will-navigate', (event, url) => {
-    if (!isInternal(url)) {
+  const handleExternalNav = (event, navUrl) => {
+    if (!navUrl || navUrl === 'about:blank') return;
+    const targetUrl = unwrapGoogleUrl(navUrl);
+    if (!isInternal(targetUrl)) {
       event.preventDefault();
-      shell.openExternal(url);
+      shell.openExternal(targetUrl);
+
+      // If this tab was newly opened and its destination was external,
+      // close this empty orphan tab instead of leaving it stuck open
+      if (!tab.pinned && !tab.locked) {
+        const canGoBack = view.webContents.canGoBack();
+        const currentUrl = view.webContents.getURL();
+        if (!canGoBack || !currentUrl || currentUrl === 'about:blank' || currentUrl.startsWith('file://')) {
+          setTimeout(() => {
+            if (tabViews.has(tab.id) && !view.webContents.canGoBack()) {
+              closeTab(tab.id);
+            }
+          }, 30);
+        }
+      }
     }
-  });
+  };
+
+  view.webContents.on('will-navigate', handleExternalNav);
+  view.webContents.on('will-redirect', handleExternalNav);
 
   // Track active URL and app
   view.webContents.on('did-navigate', (_event, url) => {
@@ -643,7 +666,15 @@ function createTabView(tab) {
 
 function createTab(url = null, appId = null, activate = true, pinned = false, locked = null) {
   const isNewTab = !url && !appId;
-  const targetUrl = isNewTab ? NEW_TAB_URL : (url || (byId(appId) ? byId(appId).url : NEW_TAB_URL));
+  const rawTargetUrl = isNewTab ? NEW_TAB_URL : (url || (byId(appId) ? byId(appId).url : NEW_TAB_URL));
+  const targetUrl = isNewTab ? rawTargetUrl : unwrapGoogleUrl(rawTargetUrl);
+
+  // If an external URL is passed to createTab, open it in default browser instead of creating an empty tab
+  if (!isNewTab && !isInternal(targetUrl)) {
+    shell.openExternal(targetUrl);
+    return null;
+  }
+
   const appDef = appId ? byId(appId) : (detectApp(targetUrl) || null);
   const detectedAppId = isNewTab ? 'newtab' : (appDef ? appDef.id : 'web');
   const isLocked = locked !== null ? Boolean(locked) : ['gmail', 'chat', 'calendar'].includes(detectedAppId);
@@ -692,8 +723,14 @@ function navigateCurrentTab(url, appId = null) {
   const tab = state.tabs.find((t) => t.id === state.active);
   if (!tab) return;
 
-  const appDef = appId ? byId(appId) : (detectApp(url) || null);
-  tab.url = url;
+  const targetUrl = unwrapGoogleUrl(url);
+  if (!isInternal(targetUrl)) {
+    shell.openExternal(targetUrl);
+    return;
+  }
+
+  const appDef = appId ? byId(appId) : (detectApp(targetUrl) || null);
+  tab.url = targetUrl;
   tab.app = appDef ? appDef.id : (tab.app !== 'newtab' ? tab.app : 'web');
   tab.title = appDef ? appDef.title : 'Caricamento...';
   tab.lastAccessed = Date.now();
