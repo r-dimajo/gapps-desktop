@@ -26,12 +26,22 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer,WaylandWindowDecorations');
 
-  // Enforce Adwaita GTK window decorations (buttons and frame) when in GNOME mode or nested Mutter
-  const isGnome =
+  // Enforce Adwaita GTK window decorations (buttons and frame) only when genuinely in GNOME mode
+  const de = (
+    process.env.XDG_CURRENT_DESKTOP ||
+    process.env.DESKTOP_SESSION ||
+    process.env.GDMSESSION ||
+    ''
+  ).toLowerCase();
+
+  const isKde = de.includes('kde') || de.includes('plasma') || process.argv.includes('--kde');
+  const isGnome = !isKde && (
     process.argv.includes('--gnome') ||
     Boolean(process.env.MUTTER_DEBUG_DUMMY_MODE_SPECS) ||
-    Boolean(process.env.WAYLAND_DISPLAY && process.env.WAYLAND_DISPLAY !== 'wayland-0') ||
-    (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase().includes('gnome');
+    de.includes('gnome') ||
+    de.includes('unity') ||
+    de.includes('pantheon')
+  );
 
   if (isGnome && !process.env.GTK_THEME) {
     process.env.GTK_THEME = 'Adwaita:dark';
@@ -53,9 +63,16 @@ if (!allowMultiple) {
     console.log("\n[Google Suite] Un'altra istanza dell'app e' gia' in esecuzione sul sistema.");
     console.log("[Google Suite] Il comando e' stato inoltrato alla finestra esistente.");
     console.log("[Google Suite] Per eseguire un'istanza di test separata (es. dentro Mutter/GNOME):");
-    console.log("               npm start -- --new-instance\n");
+    console.log("               google-suite --new-instance\n");
     app.quit();
     process.exit(0);
+  }
+
+  // Preserve existing Google logins, cookies, tabs, and settings from ~/.config/gapps
+  const appData = app.getPath('appData');
+  const legacyDir = path.join(appData, 'gapps');
+  if (fs.existsSync(legacyDir)) {
+    app.setPath('userData', legacyDir);
   }
 } else {
   const testUserData = path.join(os.tmpdir(), `gapps-session-${process.pid}`);
@@ -95,21 +112,8 @@ function isVerticalTabs() {
 }
 
 function getDesktopEnvironment() {
-  // If running inside nested mutter/gnome-shell devkit
-  if (
-    process.env.MUTTER_DEBUG_DUMMY_MODE_SPECS ||
-    process.env.GNOME_SETUP_DISPLAY
-  ) {
+  if (process.env.MUTTER_DEBUG_DUMMY_MODE_SPECS) {
     return 'gnome';
-  }
-
-  // If running on a nested Wayland display (e.g. wayland-1) under gnome-shell
-  if (process.env.WAYLAND_DISPLAY && process.env.WAYLAND_DISPLAY !== 'wayland-0') {
-    try {
-      const { execSync } = require('child_process');
-      const isGnome = execSync('pgrep -x gnome-shell || true', { encoding: 'utf8' }).trim();
-      if (isGnome) return 'gnome';
-    } catch (_) {}
   }
 
   const de = (
@@ -118,6 +122,10 @@ function getDesktopEnvironment() {
     process.env.GDMSESSION ||
     ''
   ).toLowerCase();
+
+  if (de.includes('kde') || de.includes('plasma')) {
+    return 'kde';
+  }
   if (de.includes('gnome') || de.includes('unity') || de.includes('pantheon')) {
     return 'gnome';
   }
@@ -1547,9 +1555,15 @@ app.whenReady().then(async () => {
     console.warn('Could not register global hotkey:', err);
   }
 
-  // Strip Electron identifier from User-Agent so Google accounts & services don't block login
+  // Strip Electron and app identifiers from User-Agent so Google accounts & services don't block login
   const defaultUa = session.defaultSession.getUserAgent();
-  const cleanUa = defaultUa.replace(/Electron\/\S+\s?/, '').replace(/gapps\/\S+\s?/, '');
+  const cleanUa = defaultUa
+    .replace(/Electron\/\S+\s?/, '')
+    .replace(/google-suite-linux\/\S+\s?/, '')
+    .replace(/google-suite\/\S+\s?/, '')
+    .replace(/GoogleSuite\/\S+\s?/, '')
+    .replace(/gapps\/\S+\s?/, '')
+    .trim();
   session.defaultSession.setUserAgent(cleanUa, 'en-US,en;q=0.9');
 
   // Default to English language for Google Workspace web services
