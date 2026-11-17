@@ -205,6 +205,14 @@ tabsContainer.addEventListener("drop", (e) => {
   }
 });
 
+// Horizontal mouse wheel scrolling for tab strip
+tabsContainer.addEventListener("wheel", (e) => {
+  if (currentState && currentState.layout !== "vertical" && e.deltaY !== 0) {
+    e.preventDefault();
+    tabsContainer.scrollLeft += e.deltaY;
+  }
+}, { passive: false });
+
 // Button actions: "+" opens the New Tab Grid page!
 $("new").addEventListener("click", () => window.gapps.openNewTab());
 $("new").addEventListener("contextmenu", (e) => {
