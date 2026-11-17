@@ -19,12 +19,9 @@ const os = require('os');
 const crypto = require('crypto');
 const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
 
-// Linux Wayland, sandbox, and WebRTC PipeWire hardware flags
+// Linux Wayland & hardware flags
 if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('no-sandbox');
-  app.commandLine.appendSwitch('disable-setuid-sandbox');
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer,WaylandWindowDecorations');
 
   // Enforce Adwaita GTK window decorations (buttons and frame) only when genuinely in GNOME mode
   const de = (
