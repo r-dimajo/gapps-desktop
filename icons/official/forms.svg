@@ -1,0 +1,12 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
+<style type="text/css">
+	.f0{fill:#7248B9;}
+	.f1{fill:#563592;}
+	.f2{fill:#FDFFFF;}
+</style>
+<g id="Layer_Forms">
+	<path class="f0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path class="f1" d="M42,0l22,22H42V0z"/>
+	<path class="f2" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
+</g>
+</svg>

@@ -5,6 +5,7 @@ const APPS = [
   { id: "docs",     title: "Docs",     description: "Documents and word processor",url: "https://docs.google.com",     host: "docs.google.com",     color: "#4285f4" },
   { id: "sheets",   title: "Sheets",   description: "Spreadsheets and data",       url: "https://sheets.google.com",   host: "sheets.google.com",   color: "#0f9d58" },
   { id: "slides",   title: "Slides",   description: "Presentations and slides",    url: "https://slides.google.com",   host: "slides.google.com",   color: "#f4b400" },
+  { id: "forms",    title: "Forms",    description: "Online forms and surveys",    url: "https://forms.google.com",    host: "forms.google.com",    color: "#7248b9" },
   { id: "meet",     title: "Meet",     description: "Video meetings and calls",    url: "https://meet.google.com",     host: "meet.google.com",     color: "#00897b" },
   { id: "chat",     title: "Chat",     description: "Direct messages and spaces",  url: "https://chat.google.com",     host: "chat.google.com",     color: "#34a853" },
   { id: "gemini",   title: "Gemini",   description: "Conversational AI assistant", url: "https://gemini.google.com",   host: "gemini.google.com",   color: "#8ab4f8" },
@@ -26,7 +27,16 @@ function detectApp(url) {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
+    if (
+      host === 'forms.gle' ||
+      host === 'forms.google.com' ||
+      (host === 'docs.google.com' && u.pathname.startsWith('/forms')) ||
+      (host === 'goo.gl' && u.pathname.startsWith('/forms'))
+    ) {
+      return byId('forms') || null;
+    }
     for (const app of APPS) {
+      if (app.id === 'forms') continue;
       if (host.endsWith(app.host)) return app;
     }
   } catch (_) {}
@@ -66,9 +76,12 @@ function isInternal(urlOrHost) {
   } catch (_) {}
 
   let host = target;
+  let pathname = '';
   try {
     if (target.includes('://')) {
-      host = new URL(target).hostname;
+      const parsed = new URL(target);
+      host = parsed.hostname;
+      pathname = parsed.pathname;
     }
   } catch (_) {}
   host = host.toLowerCase();
@@ -79,6 +92,9 @@ function isInternal(urlOrHost) {
     host.endsWith('.googlemail.com') ||
     host.endsWith('.googleusercontent.com') ||
     host.endsWith('.gstatic.com') ||
+    host === 'forms.gle' ||
+    host === 'g.co' ||
+    (host === 'goo.gl' && pathname.startsWith('/forms')) ||
     target.startsWith('file://')
   );
 }

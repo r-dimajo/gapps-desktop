@@ -2,7 +2,7 @@ import os
 import re
 
 apps = [
-    'gmail', 'calendar', 'drive', 'docs', 'sheets', 'slides',
+    'gmail', 'calendar', 'drive', 'docs', 'sheets', 'slides', 'forms',
     'meet', 'chat', 'gemini', 'keep', 'tasks'
 ]
 

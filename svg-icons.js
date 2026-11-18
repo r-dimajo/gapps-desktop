@@ -160,6 +160,30 @@ const ICONS = {
 	<path class="st2" d="M12,34.5v28h40v-28H12z M47,57.5H17v-18h30V57.5z"/>
 </g>
 <g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
+  forms: `<svg height="100%" width="100%" version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
+<style type="text/css">
+	.f0{fill:#7248B9;}
+	.f1{fill:#563592;}
+	.f2{fill:#FDFFFF;}
+</style>
+<g id="Layer_Forms">
+	<path class="f0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path class="f1" d="M42,0l22,22H42V0z"/>
+	<path class="f2" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
+</g>
+</svg>`,
+  "forms_badged": `<svg height="100%" width="100%" version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
+<style type="text/css">
+	.f0{fill:#7248B9;}
+	.f1{fill:#563592;}
+	.f2{fill:#FDFFFF;}
+</style>
+<g id="Layer_Forms">
+	<path class="f0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path class="f1" d="M42,0l22,22H42V0z"/>
+	<path class="f2" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
+</g>
+<g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
   meet: `<svg height="100%" width="100%" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 87.5 72">
 	<path fill="#00832d" d="M49.5 36l8.53 9.75 11.47 7.33 2-17.02-2-16.64-11.69 6.44z"/>
 	<path fill="#0066da" d="M0 51.5V66c0 3.315 2.685 6 6 6h14.5l3-10.96-3-9.54-9.95-3z"/>
