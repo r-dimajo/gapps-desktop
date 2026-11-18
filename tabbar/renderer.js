@@ -42,12 +42,32 @@ function render(state) {
 
   const { tabs = [], active = null, apps = [] } = state;
 
+  // Update URL bar for active tab
+  const activeTab = tabs.find((t) => t.id === active);
+  const urlBar = $("url-bar");
+  const urlText = $("url-text");
+  if (urlBar && urlText) {
+    if (activeTab && activeTab.url && !activeTab.url.startsWith("file://")) {
+      urlBar.style.display = "flex";
+      urlText.textContent = activeTab.url;
+      urlBar.title = `Current URL: ${activeTab.url}`;
+    } else {
+      urlBar.style.display = "none";
+      urlText.textContent = "";
+    }
+  }
+
   tabs.forEach((tab, index) => {
     const appDef = apps.find((a) => a.id === tab.app);
 
     const el = document.createElement("div");
-    el.className = "tab" + (tab.id === active ? " active" : "") + (tab.pinned ? " pinned" : "") + (tab.locked ? " locked" : "");
-    el.title = `${tab.title || "Tab"} (${index + 1})${tab.locked ? " [Locked]" : ""}${tab.pinned ? " [Pinned]" : ""}`;
+    const hasCustomTitle = Boolean(tab.customTitle);
+    el.className = "tab" +
+      (tab.id === active ? " active" : "") +
+      (tab.pinned ? " pinned" : "") +
+      (tab.locked ? " locked" : "") +
+      (hasCustomTitle ? " has-custom-title" : "");
+    el.title = `${tab.title || "Tab"} (${index + 1})${tab.locked ? " [Locked]" : ""}${tab.pinned ? " [Pinned]" : ""}${tab.url ? " — " + tab.url : ""}`;
     el.dataset.id = tab.id;
 
     // Drag and drop reordering
@@ -175,6 +195,12 @@ function render(state) {
       }
     });
 
+    // Double click to rename tab
+    el.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      window.gapps.promptRenameTab(tab.id);
+    });
+
     // Right-click native context menu
     el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -213,6 +239,23 @@ tabsContainer.addEventListener("wheel", (e) => {
   }
 }, { passive: false });
 
+// URL bar actions
+const urlCopyBtn = $("url-copy");
+if (urlCopyBtn) {
+  urlCopyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (currentState && currentState.active) {
+      const activeTab = currentState.tabs.find((t) => t.id === currentState.active);
+      if (activeTab && activeTab.url) {
+        navigator.clipboard.writeText(activeTab.url).then(() => {
+          urlCopyBtn.textContent = "✓";
+          setTimeout(() => { urlCopyBtn.innerHTML = "&#128203;"; }, 1500);
+        }).catch(() => {});
+      }
+    }
+  });
+}
+
 // Button actions: "+" opens the New Tab Grid page!
 $("new").addEventListener("click", () => window.gapps.openNewTab());
 $("new").addEventListener("contextmenu", (e) => {
@@ -233,7 +276,7 @@ if (stripToggle) {
 
 // Keyboard shortcuts within tabbar
 window.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
+  if (e.altKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
     e.preventDefault();
     window.gapps.toggleTabLayout();
   } else if (e.ctrlKey && (e.key === "t" || e.key === "T")) {

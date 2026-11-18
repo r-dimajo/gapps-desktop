@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('gapps', {
     ipcRenderer.invoke('navigate-current-tab', { url, appId }),
   toggleLockTab: (id) => ipcRenderer.invoke('toggle-lock-tab', id),
   togglePinTab: (id) => ipcRenderer.invoke('toggle-pin-tab', id),
+  setTabCustomTitle: (id, customTitle) =>
+    ipcRenderer.invoke('set-tab-custom-title', { id, customTitle }),
+  promptRenameTab: (id) => ipcRenderer.invoke('prompt-rename-tab', id),
   toggleMuteTab: (id) => ipcRenderer.invoke('toggle-mute-tab', id),
   reloadActive: () => ipcRenderer.invoke('reload-active'),
   showAppMenu: () => ipcRenderer.invoke('show-app-menu'),
@@ -23,5 +26,8 @@ contextBridge.exposeInMainWorld('gapps', {
   setDesktopTheme: (theme) => ipcRenderer.invoke('set-desktop-theme', theme),
   onState: (callback) => {
     ipcRenderer.on('state-update', (_e, state) => callback(state));
+  },
+  onRequestRenameTab: (callback) => {
+    ipcRenderer.on('request-tab-rename', (_e, tabId) => callback(tabId));
   }
 });

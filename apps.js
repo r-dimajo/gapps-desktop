@@ -11,6 +11,7 @@ const APPS = [
   { id: "gemini",   title: "Gemini",   description: "Conversational AI assistant", url: "https://gemini.google.com",   host: "gemini.google.com",   color: "#8ab4f8" },
   { id: "keep",     title: "Keep",     description: "Quick notes and lists",       url: "https://keep.google.com",     host: "keep.google.com",     color: "#fbbc04" },
   { id: "tasks",    title: "Tasks",    description: "Task management and to-dos",  url: "https://tasks.google.com",    host: "tasks.google.com",    color: "#4285f4" },
+  { id: "translate",title: "Translate",description: "Language translation",        url: "https://translate.google.com",host: "translate.google.com",color: "#4285f4" },
 ];
 
 function byId(id) {
@@ -27,16 +28,41 @@ function detectApp(url) {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
+    const pathname = u.pathname.toLowerCase();
+
+    // Google Workspace sub-apps hosted on docs.google.com or distinct domains
     if (
       host === 'forms.gle' ||
       host === 'forms.google.com' ||
-      (host === 'docs.google.com' && u.pathname.startsWith('/forms')) ||
-      (host === 'goo.gl' && u.pathname.startsWith('/forms'))
+      (host === 'docs.google.com' && pathname.startsWith('/forms')) ||
+      (host === 'goo.gl' && pathname.startsWith('/forms'))
     ) {
       return byId('forms') || null;
     }
+
+    if (
+      host === 'slides.google.com' ||
+      (host === 'docs.google.com' && pathname.startsWith('/presentation'))
+    ) {
+      return byId('slides') || null;
+    }
+
+    if (
+      host === 'sheets.google.com' ||
+      (host === 'docs.google.com' && pathname.startsWith('/spreadsheets'))
+    ) {
+      return byId('sheets') || null;
+    }
+
+    if (
+      host === 'docs.google.com' &&
+      (pathname.startsWith('/document') || pathname === '' || pathname === '/' || pathname.startsWith('/u/'))
+    ) {
+      return byId('docs') || null;
+    }
+
     for (const app of APPS) {
-      if (app.id === 'forms') continue;
+      if (['forms', 'slides', 'sheets', 'docs'].includes(app.id)) continue;
       if (host.endsWith(app.host)) return app;
     }
   } catch (_) {}

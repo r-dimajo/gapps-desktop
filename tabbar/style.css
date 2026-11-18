@@ -120,9 +120,22 @@ html, body {
   justify-content: center;
 }
 
+.tab.pinned.has-custom-title {
+  width: auto;
+  min-width: 60px;
+  max-width: 170px;
+  flex: 0 1 auto;
+  padding: 0 8px;
+  justify-content: flex-start;
+}
+
 .tab.pinned .title,
 .tab.pinned .x {
   display: none;
+}
+
+.tab.pinned.has-custom-title .title {
+  display: block;
 }
 
 .tab .tab-icon {
@@ -299,6 +312,84 @@ button:hover {
   display: flex;
   align-items: center;
   flex: none;
+  gap: 2px;
+}
+
+.controls-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* URL bar styling */
+.url-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  height: 26px;
+  max-width: 280px;
+  min-width: 120px;
+  padding: 0 6px;
+  margin-right: 6px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease, max-width 0.2s ease;
+}
+
+.url-bar:hover {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--fg);
+  max-width: 360px;
+}
+
+.url-icon {
+  font-size: 10px;
+  opacity: 0.6;
+  flex: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.url-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace, -apple-system, sans-serif;
+  letter-spacing: -0.2px;
+}
+
+.url-copy-btn {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  height: 18px;
+  width: 18px;
+  min-width: 18px;
+  font-size: 11px;
+  opacity: 0.5;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.url-copy-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--fg);
 }
 
 /* ========================================================
@@ -500,13 +591,31 @@ html.vertical #drag {
 /* Bottom footer controls */
 html.vertical #controls {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   padding: 6px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  gap: 4px;
+  gap: 6px;
   width: 100%;
   flex: none;
+}
+
+html.vertical .url-bar {
+  max-width: 100%;
+  width: 100%;
+  margin-right: 0;
+}
+
+html.vertical .url-bar:hover {
+  max-width: 100%;
+}
+
+html.vertical .controls-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 html.vertical #controls button {
@@ -576,6 +685,13 @@ html.theme-gnome .tab.pinned {
   min-width: 40px;
   max-width: 40px;
   flex: 0 0 40px;
+}
+
+html.theme-gnome .tab.pinned.has-custom-title {
+  width: auto;
+  min-width: 60px;
+  max-width: 170px;
+  flex: 0 1 auto;
 }
 
 html.theme-gnome .icon-btn,

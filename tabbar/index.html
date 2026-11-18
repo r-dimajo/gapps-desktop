@@ -12,7 +12,7 @@
         <span class="brand-icon"></span>
         <span class="brand-title">Google Suite</span>
       </div>
-      <button id="toggle-layout-top" class="icon-btn" title="Switch to top tabs (Ctrl+Shift+V)"></button>
+      <button id="toggle-layout-top" class="icon-btn" title="Switch to top tabs (Alt+Shift+V)"></button>
     </div>
 
     <!-- New Tab button and Horizontal Layout Toggle -->
@@ -21,7 +21,7 @@
         <span class="btn-icon">+</span>
         <span class="btn-text v-only">New tab</span>
       </button>
-      <button id="toggle-layout-strip" class="h-only icon-btn" title="Switch to vertical tabs (Ctrl+Shift+V)"></button>
+      <button id="toggle-layout-strip" class="h-only icon-btn" title="Switch to vertical tabs (Alt+Shift+V)"></button>
     </div>
 
     <!-- Tabs Container -->
@@ -32,8 +32,15 @@
 
     <!-- Controls / Footer -->
     <div id="controls">
-      <button id="reload" title="Reload active tab (Ctrl+R)">&#10227;</button>
-      <button id="gear" title="Settings">&#9881;</button>
+      <div id="url-bar" class="url-bar" title="Current tab URL">
+        <span class="url-icon">🔒</span>
+        <span id="url-text" class="url-text"></span>
+        <button id="url-copy" class="url-copy-btn" title="Copy URL">&#128203;</button>
+      </div>
+      <div class="controls-buttons">
+        <button id="reload" title="Reload active tab (Ctrl+R)">&#10227;</button>
+        <button id="gear" title="Settings">&#9881;</button>
+      </div>
     </div>
   </div>
   <script src="../svg-icons.js"></script>

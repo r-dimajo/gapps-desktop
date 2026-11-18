@@ -19,13 +19,16 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 - **Google Gemini**
 - **Google Keep**
 - **Google Tasks**
+- **Google Translate**
 
 ---
 
 ## Features
 
 - **Multi-Tab Workspace**: Isolated web views for each service with low memory footprint and tab reordering.
-- **Vertical & Horizontal Layouts**: Switch instantly between a top tab strip and a side tab bar (`Ctrl+Shift+V`).
+- **Vertical & Horizontal Layouts**: Switch instantly between a top tab strip and a side tab bar (`Alt+Shift+V`).
+- **Tab Pinning & Custom Naming**: Pin dedicated pages (such as a specific chat or shared drive) and customize tab titles via right-click > "Rename tab…" or double-click.
+- **URL Indicator**: Dedicated URL bar displays the current page address with one-click copy.
 - **Tab Protection**: Lock vital communication tabs (Gmail, Chat, Calendar) to prevent accidental closure.
 - **Desktop Adaptation**: Automatically matches your active desktop environment (Libadwaita styling on GNOME, Breeze on KDE Plasma).
 - **Intelligent Notifications**: Native desktop banners and unread indicators that clear automatically once you view or interact with the active conversation.
@@ -45,7 +48,7 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 | `Ctrl + Shift + Tab` | Switch to previous tab |
 | `Ctrl + 1` ... `Ctrl + 9` | Direct switch to tabs 1 through 9 |
 | `Ctrl + R` | Reload active tab |
-| `Ctrl + Shift + V` | Toggle vertical / horizontal tabs layout |
+| `Alt + Shift + V` | Toggle vertical / horizontal tabs layout |
 | `Ctrl + Alt + G` | Global hotkey to show or hide the application window |
 
 ---

@@ -11,7 +11,9 @@ const {
   session,
   desktopCapturer,
   globalShortcut,
-  Notification
+  Notification,
+  clipboard,
+  screen
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -101,7 +103,8 @@ let settings = {
   memory_saver: true,
   tab_layout: 'horizontal', // 'horizontal' | 'vertical'
   desktop_theme: 'auto', // 'auto' | 'gnome' | 'kde'
-  close_action: 'tray' // 'tray' | 'quit'
+  close_action: 'tray', // 'tray' | 'quit'
+  window_bounds: null
 };
 
 function isVerticalTabs() {
@@ -390,6 +393,7 @@ function loadState() {
       if (data && Array.isArray(data.tabs) && data.tabs.length > 0) {
         state.tabs = data.tabs.map((t) => ({
           ...t,
+          customTitle: t.customTitle || null,
           pinned: Boolean(t.pinned),
           locked: t.locked !== undefined ? Boolean(t.locked) : ['gmail', 'chat', 'calendar'].includes(t.app),
           unreadCount: 0,
@@ -425,34 +429,50 @@ function loadState() {
   state.active = id;
 }
 
+function saveStateSync() {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    // Always sync current live webContents URLs if available before writing
+    state.tabs.forEach((t) => {
+      if (tabViews.has(t.id)) {
+        try {
+          const liveUrl = tabViews.get(t.id).webContents.getURL();
+          if (liveUrl && !liveUrl.startsWith('file://') && liveUrl !== 'about:blank') {
+            t.url = liveUrl;
+          }
+        } catch (_) {}
+      }
+    });
+    fs.writeFileSync(
+      STATE_FILE,
+      JSON.stringify(
+        {
+          tabs: state.tabs.map((t) => ({
+            id: t.id,
+            app: t.app,
+            title: t.title,
+            customTitle: t.customTitle || null,
+            url: t.url,
+            pinned: Boolean(t.pinned),
+            locked: Boolean(t.locked)
+          })),
+          active: state.active
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+  } catch (err) {
+    console.error('Failed to save state:', err);
+  }
+}
+
 let saveStateTimer = null;
 function saveState() {
   clearTimeout(saveStateTimer);
   saveStateTimer = setTimeout(() => {
-    try {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      fs.writeFileSync(
-        STATE_FILE,
-        JSON.stringify(
-          {
-            tabs: state.tabs.map((t) => ({
-              id: t.id,
-              app: t.app,
-              title: t.title,
-              url: t.url,
-              pinned: Boolean(t.pinned),
-              locked: Boolean(t.locked)
-            })),
-            active: state.active
-          },
-          null,
-          2
-        ),
-        'utf8'
-      );
-    } catch (err) {
-      console.error('Failed to save state:', err);
-    }
+    saveStateSync();
   }, 300);
 }
 
@@ -462,7 +482,8 @@ function broadcastState() {
       tabs: state.tabs.map((t) => ({
         id: t.id,
         app: t.app,
-        title: t.title,
+        title: t.customTitle || t.title,
+        customTitle: t.customTitle || null,
         url: t.url,
         pinned: Boolean(t.pinned),
         locked: Boolean(t.locked),
@@ -679,7 +700,7 @@ function createTabView(tab) {
     if (state.active === tab.id && (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0))) {
       clearTabNotification(tab.id);
     }
-    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'v') {
+    if (input.type === 'keyDown' && input.alt && input.shift && input.key.toLowerCase() === 'v') {
       event.preventDefault();
       toggleTabLayout();
     }
@@ -732,8 +753,9 @@ function createTabView(tab) {
   view.webContents.on('will-navigate', handleExternalNav);
   view.webContents.on('will-redirect', handleExternalNav);
 
-  // Track active URL and app
-  view.webContents.on('did-navigate', (_event, url) => {
+  // Track active URL and app (both full navigation and SPA in-page hash/history navigation)
+  const onUrlChange = (url) => {
+    if (!url) return;
     tab.url = url;
     if (url.startsWith('file://')) {
       tab.app = 'newtab';
@@ -746,7 +768,10 @@ function createTabView(tab) {
     }
     saveState();
     broadcastState();
-  });
+  };
+
+  view.webContents.on('did-navigate', (_event, url) => onUrlChange(url));
+  view.webContents.on('did-navigate-in-page', (_event, url) => onUrlChange(url));
 
   // Update tab title and parse unread badges
   view.webContents.on('page-title-updated', (event, title) => {
@@ -764,7 +789,8 @@ function createTabView(tab) {
       updateAppBadge();
 
       if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setTitle(`${title} — Google Suite`);
+        const displayTitle = tab.customTitle || title;
+        mainWindow.setTitle(`${displayTitle} — Google Suite`);
       }
       saveState();
       broadcastState();
@@ -780,6 +806,103 @@ function createTabView(tab) {
   view.webContents.on('media-paused', () => {
     tab.isAudible = view.webContents.isCurrentlyAudible();
     broadcastState();
+  });
+
+  // Context menu handling (images, links, text editing, spellcheck)
+  view.webContents.on('context-menu', (_event, params) => {
+    const menuItems = [];
+
+    // Spellcheck suggestions
+    if (params.misspelledWord) {
+      if (params.dictionarySuggestions && params.dictionarySuggestions.length > 0) {
+        params.dictionarySuggestions.forEach((suggestion) => {
+          menuItems.push({
+            label: suggestion,
+            click: () => view.webContents.replaceMisspelling(suggestion)
+          });
+        });
+      } else {
+        menuItems.push({
+          label: 'No Guesses Found',
+          enabled: false
+        });
+      }
+      menuItems.push({ type: 'separator' });
+    }
+
+    // Image actions
+    if (params.mediaType === 'image' || params.hasImageContents) {
+      menuItems.push({
+        label: 'Copy Image',
+        click: () => view.webContents.copyImageAt(params.x, params.y)
+      });
+      if (params.srcURL) {
+        menuItems.push({
+          label: 'Copy Image Address',
+          click: () => clipboard.writeText(params.srcURL)
+        });
+        menuItems.push({
+          label: 'Save Image As…',
+          click: () => view.webContents.downloadURL(params.srcURL)
+        });
+      }
+      menuItems.push({ type: 'separator' });
+    }
+
+    // Link actions
+    if (params.linkURL) {
+      const targetUrl = unwrapGoogleUrl(params.linkURL);
+      menuItems.push({
+        label: 'Open Link in Default Browser',
+        click: () => shell.openExternal(targetUrl)
+      });
+      if (isInternal(targetUrl)) {
+        menuItems.push({
+          label: 'Open Link in New Tab',
+          click: () => createTab(targetUrl, null, true)
+        });
+      }
+      menuItems.push({
+        label: 'Copy Link Address',
+        click: () => clipboard.writeText(targetUrl)
+      });
+      menuItems.push({ type: 'separator' });
+    }
+
+    // Selection / Edit actions
+    if (params.isEditable) {
+      menuItems.push({ role: 'undo' });
+      menuItems.push({ role: 'redo' });
+      menuItems.push({ type: 'separator' });
+      menuItems.push({ role: 'cut' });
+      menuItems.push({ role: 'copy' });
+      menuItems.push({ role: 'paste' });
+      menuItems.push({ role: 'pasteAndMatchStyle', label: 'Paste as plain text' });
+      menuItems.push({ role: 'selectAll' });
+    } else if (params.selectionText && params.selectionText.trim().length > 0) {
+      menuItems.push({ role: 'copy' });
+      menuItems.push({ role: 'selectAll' });
+    }
+
+    // Clean up trailing or consecutive separators
+    const cleaned = [];
+    for (let i = 0; i < menuItems.length; i++) {
+      const item = menuItems[i];
+      if (item.type === 'separator') {
+        if (cleaned.length === 0 || cleaned[cleaned.length - 1].type === 'separator') {
+          continue;
+        }
+      }
+      cleaned.push(item);
+    }
+    if (cleaned.length > 0 && cleaned[cleaned.length - 1].type === 'separator') {
+      cleaned.pop();
+    }
+
+    if (cleaned.length > 0) {
+      const contextMenu = Menu.buildFromTemplate(cleaned);
+      contextMenu.popup({ window: mainWindow });
+    }
   });
 
   view.webContents.loadURL(tab.url);
@@ -915,8 +1038,17 @@ function activateTab(tabId) {
   state.active = tabId;
   tab.lastAccessed = Date.now();
   clearTabNotification(tabId);
+  if (view) {
+    try {
+      const liveUrl = view.webContents.getURL();
+      if (liveUrl && !liveUrl.startsWith('file://') && liveUrl !== 'about:blank' && tab.url !== liveUrl) {
+        tab.url = liveUrl;
+      }
+    } catch (_) {}
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setTitle(`${tab.title || 'Google Suite'} — Google Suite`);
+    const displayTitle = tab.customTitle || tab.title || 'Google Suite';
+    mainWindow.setTitle(`${displayTitle} — Google Suite`);
   }
 
   updateBounds();
@@ -963,6 +1095,150 @@ function closeTab(tabId) {
     saveState();
     broadcastState();
   }
+}
+
+function setTabCustomTitle(tabId, customTitle) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  tab.customTitle = customTitle && customTitle.trim() ? customTitle.trim() : null;
+  if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
+    const displayTitle = tab.customTitle || tab.title || 'Google Suite';
+    mainWindow.setTitle(`${displayTitle} — Google Suite`);
+  }
+  saveState();
+  broadcastState();
+}
+
+function promptRenameTab(tabId) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const currentName = tab.customTitle || tab.title || '';
+  const promptWin = new BrowserWindow({
+    parent: mainWindow,
+    modal: true,
+    width: 440,
+    height: 200,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    title: 'Rename Tab',
+    backgroundColor: '#202124',
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
+    }
+  });
+
+  const escapedCurrent = JSON.stringify(currentName);
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #202124;
+      color: #e8eaed;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, sans-serif;
+      padding: 20px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    h3 { font-size: 14px; font-weight: 500; margin-bottom: 8px; color: #fff; }
+    p { font-size: 12px; color: #9aa0a6; margin-bottom: 14px; }
+    input {
+      width: 100%;
+      height: 36px;
+      background: #292a2d;
+      border: 1px solid #5f6368;
+      border-radius: 6px;
+      padding: 0 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    input:focus {
+      border-color: #8ab4f8;
+      box-shadow: 0 0 0 1px #8ab4f8;
+    }
+    .buttons {
+      margin-top: 18px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      outline: none;
+    }
+    .btn-cancel {
+      background: rgba(255, 255, 255, 0.08);
+      color: #e8eaed;
+    }
+    .btn-cancel:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+    .btn-save {
+      background: #8ab4f8;
+      color: #202124;
+    }
+    .btn-save:hover {
+      background: #aecbfa;
+    }
+  </style>
+</head>
+<body>
+  <h3>Rename Tab</h3>
+  <p>Enter a custom title (leave empty to reset to page title):</p>
+  <input type="text" id="nameInput" autofocus />
+  <div class="buttons">
+    <button class="btn-cancel" id="btnCancel">Cancel</button>
+    <button class="btn-save" id="btnSave">Save</button>
+  </div>
+  <script>
+    const input = document.getElementById('nameInput');
+    input.value = ${escapedCurrent};
+    input.focus();
+    input.select();
+
+    function save() {
+      document.title = 'action:save:' + encodeURIComponent(input.value);
+    }
+    function cancel() {
+      document.title = 'action:cancel';
+    }
+
+    document.getElementById('btnSave').addEventListener('click', save);
+    document.getElementById('btnCancel').addEventListener('click', cancel);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') save();
+      else if (e.key === 'Escape') cancel();
+    });
+  </script>
+</body>
+</html>`;
+
+  promptWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+  promptWin.on('page-title-updated', (e, title) => {
+    e.preventDefault();
+    if (!title) return;
+    if (title === 'action:cancel') {
+      try { promptWin.close(); } catch (_) {}
+    } else if (title.startsWith('action:save:')) {
+      const val = decodeURIComponent(title.slice('action:save:'.length));
+      setTabCustomTitle(tabId, val);
+      try { promptWin.close(); } catch (_) {}
+    }
+  });
 }
 
 function toggleLockTab(tabId) {
@@ -1025,6 +1301,10 @@ function showTabMenu(tabId) {
     {
       label: tab.pinned ? 'Unpin tab' : 'Pin tab',
       click: () => togglePinTab(tabId)
+    },
+    {
+      label: 'Rename tab…',
+      click: () => promptRenameTab(tabId)
     },
     {
       label: tab.isMuted ? 'Unmute tab audio' : 'Mute tab audio',
@@ -1380,24 +1660,39 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 // IPC Handlers
-ipcMain.handle('get-state', () => ({
-  tabs: state.tabs.map((t) => ({
-    id: t.id,
-    app: t.app,
-    title: t.title,
-    url: t.url,
-    pinned: Boolean(t.pinned),
-    locked: Boolean(t.locked),
-    unreadCount: t.unreadCount || 0,
-    hasNotification: Boolean(t.hasNotification),
-    isAudible: Boolean(t.isAudible),
-    isMuted: Boolean(t.isMuted)
-  })),
-  active: state.active,
-  apps: APPS,
-  layout: settings.tab_layout || 'horizontal',
-  theme: getEffectiveTheme()
-}));
+ipcMain.handle('get-state', () => {
+  // Sync live webContents URLs if available
+  state.tabs.forEach((t) => {
+    if (tabViews.has(t.id)) {
+      try {
+        const liveUrl = tabViews.get(t.id).webContents.getURL();
+        if (liveUrl && !liveUrl.startsWith('file://') && liveUrl !== 'about:blank') {
+          t.url = liveUrl;
+        }
+      } catch (_) {}
+    }
+  });
+
+  return {
+    tabs: state.tabs.map((t) => ({
+      id: t.id,
+      app: t.app,
+      title: t.customTitle || t.title,
+      customTitle: t.customTitle || null,
+      url: t.url,
+      pinned: Boolean(t.pinned),
+      locked: Boolean(t.locked),
+      unreadCount: t.unreadCount || 0,
+      hasNotification: Boolean(t.hasNotification),
+      isAudible: Boolean(t.isAudible),
+      isMuted: Boolean(t.isMuted)
+    })),
+    active: state.active,
+    apps: APPS,
+    layout: settings.tab_layout || 'horizontal',
+    theme: getEffectiveTheme()
+  };
+});
 
 ipcMain.handle('get-apps', () => APPS);
 ipcMain.handle('open-new-tab', () => openNewTab());
@@ -1408,6 +1703,8 @@ ipcMain.handle('activate-tab', (_event, id) => activateTab(id));
 ipcMain.handle('close-tab', (_event, id) => closeTab(id));
 ipcMain.handle('toggle-lock-tab', (_event, id) => toggleLockTab(id));
 ipcMain.handle('toggle-pin-tab', (_event, id) => togglePinTab(id));
+ipcMain.handle('set-tab-custom-title', (_event, { id, customTitle }) => setTabCustomTitle(id, customTitle));
+ipcMain.handle('prompt-rename-tab', (_event, id) => promptRenameTab(id));
 ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
 ipcMain.handle('set-tab-layout', (_event, layout) => setTabLayout(layout));
 ipcMain.handle('toggle-tab-layout', () => toggleTabLayout());
@@ -1613,11 +1910,51 @@ app.whenReady().then(async () => {
     });
   }
 
+  // Determine target window bounds on the current monitor (where cursor is located)
+  const defaultWidth = 1280;
+  const defaultHeight = 860;
+  let targetBounds = null;
+
+  try {
+    const cursorPoint = screen.getCursorScreenPoint();
+    const currentDisplay = screen.getDisplayNearestPoint(cursorPoint);
+    if (currentDisplay && currentDisplay.workArea) {
+      const area = currentDisplay.workArea;
+      if (settings.window_bounds && typeof settings.window_bounds === 'object') {
+        const wb = settings.window_bounds;
+        // Verify saved bounds are on a connected display
+        const displays = screen.getAllDisplays();
+        const onAnyDisplay = displays.some((d) => {
+          const da = d.bounds;
+          return (
+            wb.x >= da.x - 50 &&
+            wb.x < da.x + da.width &&
+            wb.y >= da.y - 50 &&
+            wb.y < da.y + da.height
+          );
+        });
+        if (onAnyDisplay) {
+          targetBounds = wb;
+        }
+      }
+
+      if (!targetBounds) {
+        const w = Math.min(defaultWidth, area.width - 40);
+        const h = Math.min(defaultHeight, area.height - 40);
+        const x = area.x + Math.max(0, Math.round((area.width - w) / 2));
+        const y = area.y + Math.max(0, Math.round((area.height - h) / 2));
+        targetBounds = { x, y, width: w, height: h };
+      }
+    }
+  } catch (err) {
+    console.warn('Could not determine current display position:', err);
+  }
+
   // Create main window
   const appWindowIcon = nativeImage.createFromPath(ICON_PATH);
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
+  const windowOpts = {
+    width: (targetBounds && targetBounds.width) || defaultWidth,
+    height: (targetBounds && targetBounds.height) || defaultHeight,
     minWidth: 700,
     minHeight: 500,
     title: 'Google Suite',
@@ -1625,7 +1962,14 @@ app.whenReady().then(async () => {
     autoHideMenuBar: true,
     backgroundColor: '#202124',
     show: false
-  });
+  };
+
+  if (targetBounds && targetBounds.x !== undefined && targetBounds.y !== undefined) {
+    windowOpts.x = targetBounds.x;
+    windowOpts.y = targetBounds.y;
+  }
+
+  mainWindow = new BrowserWindow(windowOpts);
   try {
     mainWindow.setIcon(appWindowIcon);
   } catch (_) {}
@@ -1669,8 +2013,28 @@ app.whenReady().then(async () => {
   }, 2000);
 
   updateBounds();
-  mainWindow.on('resize', scheduleUpdateBounds);
-  mainWindow.on('resized', scheduleUpdateBounds);
+
+  let saveBoundsTimer = null;
+  const rememberBounds = () => {
+    scheduleUpdateBounds();
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMaximized() || mainWindow.isFullScreen()) {
+      return;
+    }
+    clearTimeout(saveBoundsTimer);
+    saveBoundsTimer = setTimeout(() => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMaximized() && !mainWindow.isFullScreen()) {
+          settings.window_bounds = mainWindow.getBounds();
+          saveSettings();
+        }
+      } catch (_) {}
+    }, 400);
+  };
+
+  mainWindow.on('resize', rememberBounds);
+  mainWindow.on('resized', rememberBounds);
+  mainWindow.on('move', rememberBounds);
+  mainWindow.on('moved', rememberBounds);
   mainWindow.on('maximize', scheduleUpdateBounds);
   mainWindow.on('unmaximize', scheduleUpdateBounds);
   mainWindow.on('enter-full-screen', scheduleUpdateBounds);
@@ -1684,6 +2048,7 @@ app.whenReady().then(async () => {
 
   // Close to tray / quit behavior
   mainWindow.on('close', (event) => {
+    saveStateSync();
     if (!app.isQuitting) {
       if (settings.close_action === 'quit') {
         app.isQuitting = true;
@@ -1728,5 +2093,6 @@ app.on('will-quit', () => {
 });
 
 app.on('before-quit', () => {
+  saveStateSync();
   app.isQuitting = true;
 });

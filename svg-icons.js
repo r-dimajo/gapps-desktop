@@ -82,30 +82,20 @@ const ICONS = {
 	<path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
 	<path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
 <g id="notification-dot"><circle cx="71.59" cy="14.04" r="14.74" fill="#202124"/><circle cx="71.59" cy="14.04" r="10.92" fill="#EA4335"/></g></svg>`,
-  docs: `<svg height="100%" width="100%" version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+  docs: `<svg height="100%" width="100%" version="1.1" id="Layer_Docs" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 viewBox="0 0 64 88" style="enable-background:new 0 0 64 88;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill:#3086F6;}
-	.st1{fill:#0C67D6;}
-	.st2{fill:#FDFFFF;}
-</style>
-<g id="Layer_5">
-	<path class="st0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="st1" d="M42,0l22,22H42V0z"/>
-	<path class="st2" d="M50,39H14v-5h36V39z M50,46H14v5h36V46z M40,58H14v5h26V58z"/>
+<g>
+	<path fill="#3086F6" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#0C67D6" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M50,39H14v-5h36V39z M50,46H14v5h36V46z M40,58H14v5h26V58z"/>
 </g>
 </svg>`,
-  "docs_badged": `<svg height="100%" width="100%" version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+  "docs_badged": `<svg height="100%" width="100%" version="1.1" id="Layer_Docs_Badged" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 viewBox="0 0 64 88" style="enable-background:new 0 0 64 88;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill:#3086F6;}
-	.st1{fill:#0C67D6;}
-	.st2{fill:#FDFFFF;}
-</style>
-<g id="Layer_5">
-	<path class="st0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="st1" d="M42,0l22,22H42V0z"/>
-	<path class="st2" d="M50,39H14v-5h36V39z M50,46H14v5h36V46z M40,58H14v5h26V58z"/>
+<g>
+	<path fill="#3086F6" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#0C67D6" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M50,39H14v-5h36V39z M50,46H14v5h36V46z M40,58H14v5h26V58z"/>
 </g>
 <g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
   sheets: `<svg height="100%" width="100%"
@@ -134,54 +124,34 @@ const ICONS = {
      d="M 12,34 V 63 H 52 V 34 Z M 29.5,58 H 17 v -7 h 12.5 z m 0,-12 H 17 V 39 H 29.5 Z M 47,58 H 34.5 V 51 H 47 Z M 47,46 H 34.5 V 39 H 47 Z"
      fill="#fff" />
 <g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
-  slides: `<svg height="100%" width="100%" version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+  slides: `<svg height="100%" width="100%" version="1.1" id="Layer_Slides" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 viewBox="0 0 64 88" style="enable-background:new 0 0 64 88;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill:#F8BF08;}
-	.st1{fill:#F59307;}
-	.st2{fill:#FDFFFF;}
-</style>
-<g id="Layer_3">
-	<path class="st0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="st1" d="M42,0l22,22H42V0z"/>
-	<path class="st2" d="M12,34.5v28h40v-28H12z M47,57.5H17v-18h30V57.5z"/>
+<g>
+	<path fill="#F8BF08" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#F59307" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M12,34.5v28h40v-28H12z M47,57.5H17v-18h30V57.5z"/>
 </g>
 </svg>`,
-  "slides_badged": `<svg height="100%" width="100%" version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+  "slides_badged": `<svg height="100%" width="100%" version="1.1" id="Layer_Slides_Badged" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 viewBox="0 0 64 88" style="enable-background:new 0 0 64 88;" xml:space="preserve">
-<style type="text/css">
-	.st0{fill:#F8BF08;}
-	.st1{fill:#F59307;}
-	.st2{fill:#FDFFFF;}
-</style>
-<g id="Layer_3">
-	<path class="st0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="st1" d="M42,0l22,22H42V0z"/>
-	<path class="st2" d="M12,34.5v28h40v-28H12z M47,57.5H17v-18h30V57.5z"/>
+<g>
+	<path fill="#F8BF08" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#F59307" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M12,34.5v28h40v-28H12z M47,57.5H17v-18h30V57.5z"/>
 </g>
 <g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
-  forms: `<svg height="100%" width="100%" version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
-<style type="text/css">
-	.f0{fill:#7248B9;}
-	.f1{fill:#563592;}
-	.f2{fill:#FDFFFF;}
-</style>
-<g id="Layer_Forms">
-	<path class="f0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="f1" d="M42,0l22,22H42V0z"/>
-	<path class="f2" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
+  forms: `<svg height="100%" width="100%" version="1.1" id="Layer_Forms" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
+<g>
+	<path fill="#7248B9" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#563592" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
 </g>
 </svg>`,
-  "forms_badged": `<svg height="100%" width="100%" version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
-<style type="text/css">
-	.f0{fill:#7248B9;}
-	.f1{fill:#563592;}
-	.f2{fill:#FDFFFF;}
-</style>
-<g id="Layer_Forms">
-	<path class="f0" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
-	<path class="f1" d="M42,0l22,22H42V0z"/>
-	<path class="f2" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
+  "forms_badged": `<svg height="100%" width="100%" version="1.1" id="Layer_Forms_Badged" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 64 88" xml:space="preserve">
+<g>
+	<path fill="#7248B9" d="M58,88H6c-3.3,0-6-2.7-6-6V6c0-3.3,2.7-6,6-6h36l22,22v60C64,85.3,61.3,88,58,88z"/>
+	<path fill="#563592" d="M42,0l22,22H42V0z"/>
+	<path fill="#FDFFFF" d="M16,36h32v4H16V36z M16,46h32v4H16V46z M16,56h22v4H16V56z"/>
 </g>
 <g id="notification-dot"><circle cx="52.48" cy="15.84" r="12.10" fill="#202124"/><circle cx="52.48" cy="15.84" r="8.96" fill="#EA4335"/></g></svg>`,
   meet: `<svg height="100%" width="100%" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 87.5 72">
@@ -286,6 +256,24 @@ const ICONS = {
 		s111.9,250,250,250s250-111.9,250-250c0-38.3-8.7-74.7-24.1-107.2L407.8,211C410.8,223.5,412.5,236.6,412.5,250z"/>
 </g>
 <g id="notification-dot"><circle cx="432.22" cy="90.00" r="94.50" fill="#202124"/><circle cx="432.22" cy="90.00" r="70.00" fill="#EA4335"/></g></svg>`,
+
+  translate: `<svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" viewBox="0 0 998.1 998.3" xml:space="preserve" width="100%" height="100%">
+  <path fill="#DBDBDB" d="M931.7 998.3c36.5 0 66.4-29.4 66.4-65.4V265.8c0-36-29.9-65.4-66.4-65.4H283.6l260.1 797.9h388z"/>
+  <path fill="#DCDCDC" d="M931.7 230.4c9.7 0 18.9 3.8 25.8 10.6 6.8 6.7 10.6 15.5 10.6 24.8v667.1c0 9.3-3.7 18.1-10.6 24.8-6.9 6.8-16.1 10.6-25.8 10.6H565.5L324.9 230.4h606.8m0-30H283.6l260.1 797.9h388c36.5 0 66.4-29.4 66.4-65.4V265.8c0-36-29.9-65.4-66.4-65.4z"/>
+  <polygon fill="#4352B8" points="482.3,809.8 543.7,998.3 714.4,809.8"/>
+  <path fill="#607988" d="M936.1 476.1V437H747.6v-63.2h-61.2V437H566.1v39.1h239.4c-12.8 45.1-41.1 87.7-68.7 120.8-48.9-57.9-49.1-76.7-49.1-76.7h-50.8s2.1 28.2 70.7 108.6c-22.3 22.8-39.2 36.3-39.2 36.3l15.6 48.8s23.6-20.3 53.1-51.6c29.6 32.1 67.8 70.7 117.2 116.7l32.1-32.1c-52.9-48-91.7-86.1-120.2-116.7 38.2-45.2 77-102.1 85.2-154.2H936v.1z"/>
+  <path fill="#4285F4" d="M66.4 0C29.9 0 0 29.9 0 66.5v677c0 36.5 29.9 66.4 66.4 66.4h648.1L454.4 0h-388z"/>
+  <path fill="#EEEEEE" d="M371.4 430.6c-2.5 30.3-28.4 75.2-91.1 75.2-54.3 0-98.3-44.9-98.3-100.2s44-100.2 98.3-100.2c30.9 0 51.5 13.4 63.3 24.3l41.2-39.6c-27.1-25-62.4-40.6-104.5-40.6-86.1 0-156 69.9-156 156s69.9 156 156 156c90.2 0 149.8-63.3 149.8-152.6 0-12.8-1.6-22.2-3.7-31.8h-146v53.4l91 .1z"/>
+</svg>`,
+  "translate_badged": `<svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" viewBox="0 0 998.1 998.3" xml:space="preserve" width="100%" height="100%">
+  <path fill="#DBDBDB" d="M931.7 998.3c36.5 0 66.4-29.4 66.4-65.4V265.8c0-36-29.9-65.4-66.4-65.4H283.6l260.1 797.9h388z"/>
+  <path fill="#DCDCDC" d="M931.7 230.4c9.7 0 18.9 3.8 25.8 10.6 6.8 6.7 10.6 15.5 10.6 24.8v667.1c0 9.3-3.7 18.1-10.6 24.8-6.9 6.8-16.1 10.6-25.8 10.6H565.5L324.9 230.4h606.8m0-30H283.6l260.1 797.9h388c36.5 0 66.4-29.4 66.4-65.4V265.8c0-36-29.9-65.4-66.4-65.4z"/>
+  <polygon fill="#4352B8" points="482.3,809.8 543.7,998.3 714.4,809.8"/>
+  <path fill="#607988" d="M936.1 476.1V437H747.6v-63.2h-61.2V437H566.1v39.1h239.4c-12.8 45.1-41.1 87.7-68.7 120.8-48.9-57.9-49.1-76.7-49.1-76.7h-50.8s2.1 28.2 70.7 108.6c-22.3 22.8-39.2 36.3-39.2 36.3l15.6 48.8s23.6-20.3 53.1-51.6c29.6 32.1 67.8 70.7 117.2 116.7l32.1-32.1c-52.9-48-91.7-86.1-120.2-116.7 38.2-45.2 77-102.1 85.2-154.2H936v.1z"/>
+  <path fill="#4285F4" d="M66.4 0C29.9 0 0 29.9 0 66.5v677c0 36.5 29.9 66.4 66.4 66.4h648.1L454.4 0h-388z"/>
+  <path fill="#EEEEEE" d="M371.4 430.6c-2.5 30.3-28.4 75.2-91.1 75.2-54.3 0-98.3-44.9-98.3-100.2s44-100.2 98.3-100.2c30.9 0 51.5 13.4 63.3 24.3l41.2-39.6c-27.1-25-62.4-40.6-104.5-40.6-86.1 0-156 69.9-156 156s69.9 156 156 156c90.2 0 149.8-63.3 149.8-152.6 0-12.8-1.6-22.2-3.7-31.8h-146v53.4l91 .1z"/>
+  <g id="notification-dot"><circle cx="830" cy="170" r="140" fill="#202124"/><circle cx="830" cy="170" r="105" fill="#EA4335"/></g>
+</svg>`,
 
   newtab: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="#4285F4" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>`,
 
