@@ -94,7 +94,13 @@ app.isQuitting = false;
 
 let state = {
   tabs: [],
-  active: null
+  active: null,
+  split: {
+    enabled: false,
+    tabId: null,
+    direction: 'horizontal', // 'horizontal' (side-by-side) | 'vertical' (stacked)
+    ratio: 0.5 // primary pane width/height ratio (0.2 to 0.8)
+  }
 };
 
 let settings = {
@@ -402,6 +408,15 @@ function loadState() {
           lastAccessed: Date.now()
         }));
         state.active = data.active || data.tabs[0].id;
+        if (data.split && typeof data.split === 'object') {
+          const splitTabExists = state.tabs.some((t) => t.id === data.split.tabId);
+          state.split = {
+            enabled: Boolean(data.split.enabled && splitTabExists && data.split.tabId !== state.active),
+            tabId: splitTabExists ? data.split.tabId : null,
+            direction: data.split.direction === 'vertical' ? 'vertical' : 'horizontal',
+            ratio: typeof data.split.ratio === 'number' ? Math.max(0.2, Math.min(0.8, data.split.ratio)) : 0.5
+          };
+        }
         return;
       }
     }
@@ -456,7 +471,8 @@ function saveStateSync() {
             pinned: Boolean(t.pinned),
             locked: Boolean(t.locked)
           })),
-          active: state.active
+          active: state.active,
+          split: state.split
         },
         null,
         2
@@ -493,6 +509,7 @@ function broadcastState() {
         isMuted: Boolean(t.isMuted)
       })),
       active: state.active,
+      split: state.split,
       apps: APPS,
       layout: settings.tab_layout || 'horizontal',
       theme: getEffectiveTheme()
@@ -548,29 +565,90 @@ function updateBounds() {
     } catch (_) {}
   }
 
-  if (state.active && tabViews.has(state.active)) {
-    const activeView = tabViews.get(state.active);
-    if (vertical) {
-      const viewWidth = Math.max(0, width - VERTICAL_TABBAR_WIDTH);
-      activeView.setBounds({
-        x: VERTICAL_TABBAR_WIDTH,
-        y: 0,
-        width: viewWidth,
-        height
+  // Work area coordinates for web contents
+  const contentX = vertical ? VERTICAL_TABBAR_WIDTH : 0;
+  const contentY = vertical ? 0 : TABBAR_HEIGHT;
+  const contentWidth = Math.max(0, vertical ? width - VERTICAL_TABBAR_WIDTH : width);
+  const contentHeight = Math.max(0, vertical ? height : height - TABBAR_HEIGHT);
+
+  const isSplitActive = Boolean(
+    state.split &&
+    state.split.enabled &&
+    state.split.tabId &&
+    state.split.tabId !== state.active &&
+    tabViews.has(state.split.tabId)
+  );
+
+  const primaryView = state.active && tabViews.has(state.active) ? tabViews.get(state.active) : null;
+  const secondaryView = isSplitActive ? tabViews.get(state.split.tabId) : null;
+
+  if (primaryView && !secondaryView) {
+    primaryView.setBounds({
+      x: contentX,
+      y: contentY,
+      width: contentWidth,
+      height: contentHeight
+    });
+    try {
+      primaryView.setVisible(true);
+      if (primaryView.webContents && !primaryView.webContents.isDestroyed()) {
+        primaryView.webContents.invalidate();
+      }
+    } catch (_) {}
+  } else if (primaryView && secondaryView) {
+    const ratio = (state.split && state.split.ratio) || 0.5;
+    const isHorizontalSplit = !state.split || state.split.direction !== 'vertical'; // default side-by-side
+
+    if (isHorizontalSplit) {
+      // Side-by-side (left / right)
+      const dividerW = 4;
+      const availableW = Math.max(0, contentWidth - dividerW);
+      const w1 = Math.round(availableW * ratio);
+      const w2 = availableW - w1;
+
+      primaryView.setBounds({
+        x: contentX,
+        y: contentY,
+        width: w1,
+        height: contentHeight
+      });
+      secondaryView.setBounds({
+        x: contentX + w1 + dividerW,
+        y: contentY,
+        width: w2,
+        height: contentHeight
       });
     } else {
-      const viewHeight = Math.max(0, height - TABBAR_HEIGHT);
-      activeView.setBounds({
-        x: 0,
-        y: TABBAR_HEIGHT,
-        width,
-        height: viewHeight
+      // Stacked (top / bottom)
+      const dividerH = 4;
+      const availableH = Math.max(0, contentHeight - dividerH);
+      const h1 = Math.round(availableH * ratio);
+      const h2 = availableH - h1;
+
+      primaryView.setBounds({
+        x: contentX,
+        y: contentY,
+        width: contentWidth,
+        height: h1
+      });
+      secondaryView.setBounds({
+        x: contentX,
+        y: contentY + h1 + dividerH,
+        width: contentWidth,
+        height: h2
       });
     }
+
     try {
-      activeView.setVisible(true);
-      if (activeView.webContents && !activeView.webContents.isDestroyed()) {
-        activeView.webContents.invalidate();
+      primaryView.setVisible(true);
+      if (primaryView.webContents && !primaryView.webContents.isDestroyed()) {
+        primaryView.webContents.invalidate();
+      }
+    } catch (_) {}
+    try {
+      secondaryView.setVisible(true);
+      if (secondaryView.webContents && !secondaryView.webContents.isDestroyed()) {
+        secondaryView.webContents.invalidate();
       }
     } catch (_) {}
   }
@@ -703,6 +781,11 @@ function createTabView(tab) {
     if (input.type === 'keyDown' && input.alt && input.shift && input.key.toLowerCase() === 'v') {
       event.preventDefault();
       toggleTabLayout();
+      return;
+    }
+    if (input.type === 'keyDown' && input.alt && input.shift && input.key.toLowerCase() === 's') {
+      event.preventDefault();
+      showSplitMenu();
       return;
     }
 
@@ -1024,6 +1107,63 @@ function navigateCurrentTab(url, appId = null) {
   broadcastState();
 }
 
+function setSplitView(tabId = null, direction = 'horizontal', ratio = 0.5) {
+  if (!tabId || tabId === state.active) {
+    // If no tabId or same as active tab, disable split view
+    if (state.split && state.split.enabled && state.split.tabId && tabViews.has(state.split.tabId)) {
+      const prevSecondary = tabViews.get(state.split.tabId);
+      if (mainWindow && !mainWindow.isDestroyed() && state.split.tabId !== state.active) {
+        try { mainWindow.contentView.removeChildView(prevSecondary); } catch (_) {}
+      }
+    }
+    state.split = {
+      enabled: false,
+      tabId: null,
+      direction: 'horizontal',
+      ratio: 0.5
+    };
+  } else {
+    const secondaryTab = state.tabs.find((t) => t.id === tabId);
+    if (!secondaryTab) return;
+
+    // Detach old secondary if different
+    if (state.split && state.split.tabId && state.split.tabId !== tabId && tabViews.has(state.split.tabId)) {
+      const prevSecondary = tabViews.get(state.split.tabId);
+      if (mainWindow && !mainWindow.isDestroyed() && state.split.tabId !== state.active) {
+        try { mainWindow.contentView.removeChildView(prevSecondary); } catch (_) {}
+      }
+    }
+
+    // Lazy load secondary tab view
+    let secView = tabViews.get(tabId);
+    if (!secView) {
+      secView = createTabView(secondaryTab);
+      tabViews.set(tabId, secView);
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.contentView.addChildView(secView); } catch (_) {}
+    }
+
+    secondaryTab.lastAccessed = Date.now();
+    clearTabNotification(tabId);
+
+    state.split = {
+      enabled: true,
+      tabId,
+      direction: direction === 'vertical' ? 'vertical' : 'horizontal',
+      ratio: typeof ratio === 'number' ? Math.max(0.2, Math.min(0.8, ratio)) : 0.5
+    };
+  }
+
+  updateBounds();
+  saveState();
+  broadcastState();
+}
+
+function closeSplitView() {
+  setSplitView(null);
+}
+
 function activateTab(tabId) {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
@@ -1031,12 +1171,25 @@ function activateTab(tabId) {
   tab.lastAccessed = Date.now();
 
   const prevActiveId = state.active;
+  // If moving away from a tab that is not the secondary split tab, detach it
   if (prevActiveId && prevActiveId !== tabId && tabViews.has(prevActiveId)) {
-    const prevView = tabViews.get(prevActiveId);
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    const isSplitSec = state.split && state.split.enabled && state.split.tabId === prevActiveId;
+    if (!isSplitSec && mainWindow && !mainWindow.isDestroyed()) {
+      const prevView = tabViews.get(prevActiveId);
       try {
         mainWindow.contentView.removeChildView(prevView);
       } catch (_) {}
+    }
+  }
+
+  // If activating the tab that is currently secondary in split view, close split view or swap
+  if (state.split && state.split.enabled && state.split.tabId === tabId) {
+    if (prevActiveId && prevActiveId !== tabId) {
+      // Swap: make previous active the new secondary split tab
+      state.split.tabId = prevActiveId;
+    } else {
+      state.split.enabled = false;
+      state.split.tabId = null;
     }
   }
 
@@ -1100,6 +1253,12 @@ function closeTab(tabId) {
 
   state.tabs.splice(index, 1);
   updateAppBadge();
+
+  // If closed tab was the secondary split view tab, reset split
+  if (state.split && state.split.tabId === tabId) {
+    state.split.enabled = false;
+    state.split.tabId = null;
+  }
 
   if (state.tabs.length === 0) {
     openNewTab();
@@ -1311,6 +1470,39 @@ function showTabMenu(tabId) {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
 
+  const otherTabs = state.tabs.filter((t) => t.id !== tabId);
+  const isCurrentlySplit = state.split && state.split.enabled && (state.split.tabId === tabId || state.active === tabId);
+
+  const splitSubmenu = otherTabs.length === 0 ? [] : [
+    {
+      label: 'Side-by-side (Right)',
+      submenu: otherTabs.map((ot) => ({
+        label: ot.customTitle || ot.title,
+        click: () => {
+          if (state.active !== tabId) activateTab(tabId);
+          setSplitView(ot.id, 'horizontal', 0.5);
+        }
+      }))
+    },
+    {
+      label: 'Stacked (Bottom)',
+      submenu: otherTabs.map((ot) => ({
+        label: ot.customTitle || ot.title,
+        click: () => {
+          if (state.active !== tabId) activateTab(tabId);
+          setSplitView(ot.id, 'vertical', 0.5);
+        }
+      }))
+    }
+  ];
+
+  if (isCurrentlySplit) {
+    splitSubmenu.unshift({
+      label: 'Close split view',
+      click: () => closeSplitView()
+    }, { type: 'separator' });
+  }
+
   const template = [
     {
       label: tab.locked ? '🔓 Unlock tab (Allow closing)' : '🔒 Lock tab (Prevent accidental closing)',
@@ -1328,6 +1520,11 @@ function showTabMenu(tabId) {
       label: tab.isMuted ? 'Unmute tab audio' : 'Mute tab audio',
       enabled: Boolean(tab.isAudible || tab.isMuted),
       click: () => toggleMuteTab(tabId)
+    },
+    { type: 'separator' },
+    {
+      label: 'Split view',
+      submenu: splitSubmenu.length > 0 ? splitSubmenu : [{ label: 'No other tabs available', enabled: false }]
     },
     { type: 'separator' },
     {
@@ -1369,6 +1566,58 @@ function showTabMenu(tabId) {
       }
     }
   ];
+
+  const menu = Menu.buildFromTemplate(template);
+  menu.popup({ window: mainWindow });
+}
+
+function showSplitMenu() {
+  const activeTabId = state.active;
+  const activeTab = state.tabs.find((t) => t.id === activeTabId);
+  const otherTabs = state.tabs.filter((t) => t.id !== activeTabId);
+  const isCurrentlySplit = Boolean(state.split && state.split.enabled && state.split.tabId);
+
+  const template = [];
+
+  if (isCurrentlySplit) {
+    const secTab = state.tabs.find((t) => t.id === state.split.tabId);
+    const secTitle = secTab ? (secTab.customTitle || secTab.title) : 'Secondary tab';
+    template.push({
+      label: `Close split view (${secTitle})`,
+      click: () => closeSplitView()
+    });
+    template.push({
+      label: state.split.direction === 'vertical' ? 'Switch to side-by-side (Right)' : 'Switch to stacked (Bottom)',
+      click: () => setSplitView(state.split.tabId, state.split.direction === 'vertical' ? 'horizontal' : 'vertical', state.split.ratio)
+    });
+    template.push({
+      label: 'Reset split size (50 / 50)',
+      click: () => setSplitView(state.split.tabId, state.split.direction, 0.5)
+    });
+    template.push({ type: 'separator' });
+  }
+
+  if (otherTabs.length === 0) {
+    template.push({
+      label: 'Open another tab first to split view',
+      enabled: false
+    });
+  } else {
+    template.push({
+      label: 'Split Side-by-side (Right) with…',
+      submenu: otherTabs.map((ot) => ({
+        label: ot.customTitle || ot.title,
+        click: () => setSplitView(ot.id, 'horizontal', 0.5)
+      }))
+    });
+    template.push({
+      label: 'Split Stacked (Bottom) with…',
+      submenu: otherTabs.map((ot) => ({
+        label: ot.customTitle || ot.title,
+        click: () => setSplitView(ot.id, 'vertical', 0.5)
+      }))
+    });
+  }
 
   const menu = Menu.buildFromTemplate(template);
   menu.popup({ window: mainWindow });
@@ -1706,6 +1955,7 @@ ipcMain.handle('get-state', () => {
       isMuted: Boolean(t.isMuted)
     })),
     active: state.active,
+    split: state.split,
     apps: APPS,
     layout: settings.tab_layout || 'horizontal',
     theme: getEffectiveTheme()
@@ -1727,6 +1977,9 @@ ipcMain.handle('toggle-mute-tab', (_event, id) => toggleMuteTab(id));
 ipcMain.handle('set-tab-layout', (_event, layout) => setTabLayout(layout));
 ipcMain.handle('toggle-tab-layout', () => toggleTabLayout());
 ipcMain.handle('set-desktop-theme', (_event, theme) => setDesktopTheme(theme));
+ipcMain.handle('set-split-view', (_event, { tabId, direction, ratio }) => setSplitView(tabId, direction, ratio));
+ipcMain.handle('close-split-view', () => closeSplitView());
+ipcMain.handle('show-split-menu', () => showSplitMenu());
 
 ipcMain.handle('move-tab', (_event, { sourceId, targetId, dropAfter }) => {
   const sourceIndex = state.tabs.findIndex((t) => t.id === sourceId);

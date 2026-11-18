@@ -37,6 +37,20 @@ function render(state) {
     brandIconEl.innerHTML = ICONS.tray;
   }
 
+  const splitBtn = $("split-btn");
+  if (splitBtn && typeof ICONS !== "undefined") {
+    const isSplit = Boolean(state.split && state.split.enabled && state.split.tabId);
+    if (isSplit) {
+      splitBtn.innerHTML = ICONS.splitClose;
+      splitBtn.title = "Close split view (Alt+Shift+S)";
+      splitBtn.classList.add("active");
+    } else {
+      splitBtn.innerHTML = ICONS.splitRight;
+      splitBtn.title = "Split view multiplexer (Alt+Shift+S)";
+      splitBtn.classList.remove("active");
+    }
+  }
+
   const container = $("tabs");
   container.textContent = "";
 
@@ -62,12 +76,14 @@ function render(state) {
 
     const el = document.createElement("div");
     const hasCustomTitle = Boolean(tab.customTitle);
+    const isSplitSec = Boolean(state.split && state.split.enabled && state.split.tabId === tab.id);
     el.className = "tab" +
       (tab.id === active ? " active" : "") +
+      (isSplitSec ? " split-active" : "") +
       (tab.pinned ? " pinned" : "") +
       (tab.locked ? " locked" : "") +
       (hasCustomTitle ? " has-custom-title" : "");
-    el.title = `${tab.title || "Tab"} (${index + 1})${tab.locked ? " [Locked]" : ""}${tab.pinned ? " [Pinned]" : ""}${tab.url ? " — " + tab.url : ""}`;
+    el.title = `${tab.title || "Tab"} (${index + 1})${isSplitSec ? " [Split View]" : ""}${tab.locked ? " [Locked]" : ""}${tab.pinned ? " [Pinned]" : ""}${tab.url ? " — " + tab.url : ""}`;
     el.dataset.id = tab.id;
 
     // Drag and drop reordering
@@ -265,6 +281,21 @@ $("new").addEventListener("contextmenu", (e) => {
 $("reload").addEventListener("click", () => window.gapps.reloadActive());
 $("gear").addEventListener("click", () => window.gapps.showSettingsMenu());
 
+const splitBtnAction = $("split-btn");
+if (splitBtnAction) {
+  splitBtnAction.addEventListener("click", () => {
+    if (currentState && currentState.split && currentState.split.enabled) {
+      window.gapps.closeSplitView();
+    } else {
+      window.gapps.showSplitMenu();
+    }
+  });
+  splitBtnAction.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    window.gapps.showSplitMenu();
+  });
+}
+
 const topToggle = $("toggle-layout-top");
 if (topToggle) {
   topToggle.addEventListener("click", () => window.gapps.toggleTabLayout());
@@ -279,6 +310,9 @@ window.addEventListener("keydown", (e) => {
   if (e.altKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
     e.preventDefault();
     window.gapps.toggleTabLayout();
+  } else if (e.altKey && e.shiftKey && (e.key === "s" || e.key === "S")) {
+    e.preventDefault();
+    window.gapps.showSplitMenu();
   } else if (e.ctrlKey && (e.key === "t" || e.key === "T")) {
     e.preventDefault();
     window.gapps.openNewTab();

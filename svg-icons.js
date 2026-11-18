@@ -291,7 +291,13 @@ const ICONS = {
 
   layoutVertical: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H9V5h10v14zM5 5h2v14H5V5z"/></svg>`,
 
-  layoutHorizontal: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V9h14v10zm0-12H5V5h14v2z"/></svg>`
+  layoutHorizontal: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V9h14v10zm0-12H5V5h14v2z"/></svg>`,
+
+  splitRight: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 16H5V5h6v14zm8 0h-6V5h6v14z"/></svg>`,
+
+  splitDown: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 8H5V5h14v6zm0 8H5v-6h14v6z"/></svg>`,
+
+  splitClose: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`
 
 };
 

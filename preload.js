@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('gapps', {
   showSettingsMenu: () => ipcRenderer.invoke('show-settings-menu'),
   setTabLayout: (layout) => ipcRenderer.invoke('set-tab-layout', layout),
   toggleTabLayout: () => ipcRenderer.invoke('toggle-tab-layout'),
+  setSplitView: (tabId, direction, ratio) =>
+    ipcRenderer.invoke('set-split-view', { tabId, direction, ratio }),
+  closeSplitView: () => ipcRenderer.invoke('close-split-view'),
+  showSplitMenu: () => ipcRenderer.invoke('show-split-menu'),
   setDesktopTheme: (theme) => ipcRenderer.invoke('set-desktop-theme', theme),
   onState: (callback) => {
     ipcRenderer.on('state-update', (_e, state) => callback(state));

@@ -26,6 +26,7 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 ## Features
 
 - **Multi-Tab Workspace**: Isolated web views for each service with low memory footprint and tab reordering.
+- **Split View Multiplexing**: Tile two tabs simultaneously side-by-side or stacked (`Alt+Shift+S`, right-click on any tab, or toolbar split button).
 - **Vertical & Horizontal Layouts**: Switch instantly between a top tab strip and a side tab bar (`Alt+Shift+V`).
 - **Tab Pinning & Custom Naming**: Pin dedicated pages (such as a specific chat or shared drive) and customize tab titles via right-click > "Rename tab…" or double-click.
 - **URL Indicator**: Dedicated URL bar displays the current page address with one-click copy.
@@ -49,6 +50,7 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 | `Ctrl + 1` ... `Ctrl + 9` | Direct switch to tabs 1 through 9 |
 | `Ctrl + R` | Reload active tab |
 | `Alt + Shift + V` | Toggle vertical / horizontal tabs layout |
+| `Alt + Shift + S` | Toggle / configure split view multiplexer |
 | `Ctrl + Alt + G` | Global hotkey to show or hide the application window |
 
 ---
