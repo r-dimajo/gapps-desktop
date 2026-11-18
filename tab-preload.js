@@ -94,6 +94,20 @@ try {
           }, { capture: true, passive: true });
         } catch (_) {}
       });
+
+      // Emulate Google Docs Offline Chrome Extension presence and permissions
+      // so Google Docs/Sheets/Slides grant clipboard actions and don't prompt for extension installation
+      try {
+        window._docs_chrome_extension_exists = true;
+        window._docs_chrome_extension_features_version = 1;
+        window._docs_chrome_extension_permissions = [
+          'alarms',
+          'clipboardRead',
+          'clipboardWrite',
+          'storage',
+          'unlimitedStorage'
+        ];
+      } catch (_) {}
     })();
   `);
 } catch (err) {

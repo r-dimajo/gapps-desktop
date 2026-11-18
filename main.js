@@ -703,6 +703,17 @@ function createTabView(tab) {
     if (input.type === 'keyDown' && input.alt && input.shift && input.key.toLowerCase() === 'v') {
       event.preventDefault();
       toggleTabLayout();
+      return;
+    }
+
+    // Ensure Paste without formatting (Ctrl+Shift+V) works consistently across all web views
+    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'v') {
+      event.preventDefault();
+      try {
+        view.webContents.pasteAndMatchStyle();
+      } catch (_) {
+        view.webContents.paste();
+      }
     }
   });
 
@@ -869,7 +880,7 @@ function createTabView(tab) {
       menuItems.push({ type: 'separator' });
     }
 
-    // Selection / Edit actions
+    // Selection / Edit actions (always include paste and copy actions for rich web editors like Google Docs)
     if (params.isEditable) {
       menuItems.push({ role: 'undo' });
       menuItems.push({ role: 'redo' });
@@ -881,6 +892,13 @@ function createTabView(tab) {
       menuItems.push({ role: 'selectAll' });
     } else if (params.selectionText && params.selectionText.trim().length > 0) {
       menuItems.push({ role: 'copy' });
+      menuItems.push({ role: 'selectAll' });
+    } else if (isInternal(tab.url)) {
+      // In web apps like Google Docs where canvas rendering is used, params.isEditable may be false
+      menuItems.push({ role: 'cut' });
+      menuItems.push({ role: 'copy' });
+      menuItems.push({ role: 'paste' });
+      menuItems.push({ role: 'pasteAndMatchStyle', label: 'Paste as plain text' });
       menuItems.push({ role: 'selectAll' });
     }
 
@@ -1973,6 +1991,24 @@ app.whenReady().then(async () => {
   try {
     mainWindow.setIcon(appWindowIcon);
   } catch (_) {}
+
+  // Setup default application edit menu so system copy/paste shortcuts route properly
+  const appMenuTemplate = [
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'selectAll' }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate));
 
   // Create permanent 36px tab bar view at top
   tabbarView = new WebContentsView({
