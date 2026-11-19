@@ -20,7 +20,27 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const https = require('https');
-const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
+const {
+  APPS,
+  byId,
+  byHost,
+  detectApp,
+  isInternal,
+  isTrustedOrigin,
+  isSafeExternalUrl,
+  unwrapGoogleUrl
+} = require('./apps');
+
+// Hand a URL to the OS only for safe schemes (http/https/mailto/tel).
+// Prevents pages from launching local files (file://) or arbitrary protocol handlers.
+function safeOpenExternal(url) {
+  if (!isSafeExternalUrl(url)) {
+    console.warn('[Google Suite] Blocked openExternal for unsafe URL:', String(url).slice(0, 200));
+    return false;
+  }
+  shell.openExternal(url).catch((err) => console.warn('openExternal failed:', err));
+  return true;
+}
 
 // Linux Wayland & hardware flags
 app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -555,6 +575,61 @@ function isTabActivelyViewed(tabId) {
   return Boolean(isWindowActive);
 }
 
+// Whether a tab is on screen (active or split secondary, window shown and not minimized).
+// Sent to tab-preload.js to drive document.hidden / visibilityState.
+function computeTabVisible(tabId) {
+  if (!tabId) return false;
+  const shown =
+    state.active === tabId ||
+    Boolean(state.split && state.split.enabled && state.split.tabId === tabId);
+  return Boolean(
+    shown &&
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      mainWindow.isVisible() &&
+      !mainWindow.isMinimized()
+  );
+}
+
+const lastSentVisibility = new Map();
+
+function sendTabVisibility(tabId, force = false) {
+  const view = tabViews.get(tabId);
+  if (!view || view.webContents.isDestroyed()) {
+    lastSentVisibility.delete(tabId);
+    return;
+  }
+  const visible = computeTabVisible(tabId);
+  if (!force && lastSentVisibility.get(tabId) === visible) return;
+  lastSentVisibility.set(tabId, visible);
+  try {
+    view.webContents.send('gapps-visibility', visible);
+  } catch (_) {}
+}
+
+function syncTabVisibility() {
+  for (const tabId of tabViews.keys()) {
+    sendTabVisibility(tabId);
+  }
+  for (const tabId of Array.from(lastSentVisibility.keys())) {
+    if (!tabViews.has(tabId)) lastSentVisibility.delete(tabId);
+  }
+
+  // The user is looking at the tab: drop the generic "new notification" dot.
+  // Real unread counts stay until the web app reports them as read.
+  let changed = false;
+  state.tabs.forEach((t) => {
+    if (t.hasNotification && isTabActivelyViewed(t.id)) {
+      t.hasNotification = false;
+      changed = true;
+    }
+  });
+  if (changed) {
+    updateAppBadge();
+    broadcastState();
+  }
+}
+
 function clearTabNotification(tabId) {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
@@ -685,7 +760,96 @@ function scheduleUpdateBounds() {
   }, 40);
 }
 
-function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
+const ALLOWED_PERMISSIONS = new Set([
+  'notifications',
+  'media',
+  'display-capture',
+  'mediaKeySystem',
+  'clipboard-read',
+  'clipboard-sanitized-write',
+  'fullscreen',
+  'pointerLock',
+  'keyboardLock',
+  'speaker-selection',
+  'window-management',
+  'screen-wake-lock'
+]);
+
+function isPermissionAllowed(permission, origin) {
+  return ALLOWED_PERMISSIONS.has(permission) && isTrustedOrigin(origin);
+}
+
+function isWaylandSession() {
+  return (
+    (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland' ||
+    Boolean(process.env.WAYLAND_DISPLAY)
+  );
+}
+
+// Ask the user which screen/window to share instead of silently picking the first one
+function pickDisplaySource(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return Promise.resolve(null);
+  // On Wayland, getSources() goes through the xdg-desktop-portal dialog: the single
+  // returned source is the one the user just picked there.
+  if (sources.length === 1 && isWaylandSession()) return Promise.resolve(sources[0]);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      resolve(value);
+    };
+
+    const screens = sources.filter((src) => src.id.startsWith('screen:'));
+    const windows = sources.filter((src) => !src.id.startsWith('screen:')).slice(0, 25);
+    const items = [{ label: 'Condividi schermo', enabled: false }];
+    screens.forEach((src, i) => {
+      items.push({ label: `Schermo: ${src.name || i + 1}`, click: () => finish(src) });
+    });
+    if (windows.length > 0) {
+      items.push({ type: 'separator' });
+      windows.forEach((src) => {
+        items.push({ label: `Finestra: ${(src.name || 'Senza titolo').slice(0, 80)}`, click: () => finish(src) });
+      });
+    }
+    items.push({ type: 'separator' });
+    items.push({ label: 'Annulla', click: () => finish(null) });
+
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      Menu.buildFromTemplate(items).popup({
+        window: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+        // Menu closed without a choice = cancel. Delay so a click handler runs first.
+        callback: () => setTimeout(() => finish(null), 100)
+      });
+    } catch (err) {
+      console.warn('Screen picker failed:', err);
+      finish(null);
+    }
+  });
+}
+
+// Keep references to shown notifications: if the JS object is garbage collected,
+// its 'click' handler no longer fires. Bounded LRU keyed by tab + tag.
+const activeNotifications = new Map();
+const MAX_ACTIVE_NOTIFICATIONS = 100;
+
+function showCustomNotification({
+  title,
+  body,
+  icon,
+  tag,
+  silent,
+  appId,
+  tabId,
+  pageNotificationId = null,
+  sourceWebContents = null
+}) {
   if (!Notification.isSupported()) return;
 
   const appDef = byId(appId);
@@ -724,8 +888,23 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     body: body || '',
     icon: notifIcon,
     urgency: 'normal',
-    silent: false
+    silent: Boolean(silent)
   });
+
+  const key = `${tabId || appId || 'app'}:${tag || pageNotificationId || `${Date.now()}_${Math.random()}`}`;
+
+  // Same tag = same conversation/thread: replace the previous popup instead of stacking
+  const previous = activeNotifications.get(key);
+  if (previous) {
+    activeNotifications.delete(key);
+    try {
+      previous.close();
+    } catch (_) {}
+  }
+  activeNotifications.set(key, notification);
+  while (activeNotifications.size > MAX_ACTIVE_NOTIFICATIONS) {
+    activeNotifications.delete(activeNotifications.keys().next().value);
+  }
 
   notification.on('click', () => {
     if (!mainWindow) return;
@@ -738,11 +917,20 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     } else if (appId) {
       showAndSwitchTo(appId);
     }
+
+    // Forward the click to the page so the web app runs its own onclick
+    // (e.g. Google Chat opens the conversation the message belongs to)
+    if (pageNotificationId && sourceWebContents && !sourceWebContents.isDestroyed()) {
+      try {
+        sourceWebContents.send('gapps-notification-event', { id: pageNotificationId, type: 'click' });
+      } catch (_) {}
+    }
   });
 
   try {
     notification.show();
   } catch (err) {
+    activeNotifications.delete(key);
     console.error('Failed to show notification:', err);
   }
 }
@@ -754,7 +942,6 @@ function triggerNotificationForApp(appId, title, body) {
   }
   if (targetTab) {
     targetTab.hasNotification = true;
-    targetTab.unreadCount = (targetTab.unreadCount || 0) + 1;
     updateAppBadge();
     broadcastState();
   } else {
@@ -835,7 +1022,7 @@ function checkForAppUpdates(interactive = false) {
             });
 
             notif.on('click', () => {
-              shell.openExternal(targetUrl);
+              safeOpenExternal(targetUrl);
             });
 
             try {
@@ -857,7 +1044,7 @@ function checkForAppUpdates(interactive = false) {
                 })
                 .then((result) => {
                   if (result.response === 0) {
-                    shell.openExternal(targetUrl);
+                    safeOpenExternal(targetUrl);
                   }
                 });
             }
@@ -904,7 +1091,7 @@ function createTabView(tab) {
         : path.join(__dirname, 'tab-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: true,
       backgroundThrottling: false
     }
@@ -945,7 +1132,7 @@ function createTabView(tab) {
       createTab(targetUrl, null, true);
       return { action: 'deny' };
     }
-    shell.openExternal(targetUrl);
+    safeOpenExternal(targetUrl);
     return { action: 'deny' };
   });
 
@@ -954,7 +1141,7 @@ function createTabView(tab) {
     const targetUrl = unwrapGoogleUrl(navUrl);
     if (!isInternal(targetUrl)) {
       event.preventDefault();
-      shell.openExternal(targetUrl);
+      safeOpenExternal(targetUrl);
 
       // If this tab was newly opened and its destination was external,
       // close this empty orphan tab instead of leaving it stuck open
@@ -995,50 +1182,13 @@ function createTabView(tab) {
   view.webContents.on('did-navigate', (_event, url) => onUrlChange(url));
   view.webContents.on('did-navigate-in-page', (_event, url) => onUrlChange(url));
 
-  // Update tab title and parse unread badges
+  // Update tab title. Unread counts are NOT parsed here: they come only from the
+  // tab-preload observer (tab-unread-count), otherwise the two sources fight and
+  // badges disappear on their own (e.g. Chat title "Mario Rossi - Chat").
   view.webContents.on('page-title-updated', (event, title) => {
     event.preventDefault();
     if (title) {
       tab.title = title;
-
-      // Extract unread message count from title (e.g. "Inbox (5) - user@gmail.com" or "(3) Google Chat")
-      const match = title.match(/\(([0-9]+)\)/);
-      const starMatch = title.trim().startsWith('*');
-      const prevUnread = tab.unreadCount || 0;
-
-      if (match) {
-        const parsed = parseInt(match[1], 10);
-        tab.unreadCount = parsed;
-        tab.hasNotification = parsed > 0;
-        if (parsed > prevUnread && !isTabActivelyViewed(tab.id)) {
-          const appDef = byId(tab.app);
-          showCustomNotification({
-            title: title,
-            body: `${parsed} non letti in ${appDef ? appDef.title : 'Google Suite'}`,
-            appId: tab.app,
-            tabId: tab.id
-          });
-        }
-      } else if (starMatch) {
-        tab.unreadCount = Math.max(1, prevUnread);
-        tab.hasNotification = true;
-      } else {
-        // Title has neither numbers like (5) nor '*'
-        // If title has stabilized to standard format (e.g. "Google Chat" or "Inbox - user@gmail.com"),
-        // the app has 0 unread messages (e.g. read from smartphone or another client)
-        const isStandardCleanTitle =
-          title === 'Google Chat' ||
-          title.startsWith('Google Chat') ||
-          title.includes(' - ') ||
-          title === 'Gmail';
-
-        if (isStandardCleanTitle && (tab.unreadCount > 0 || tab.hasNotification)) {
-          tab.unreadCount = 0;
-          tab.hasNotification = false;
-        }
-      }
-
-      updateAppBadge();
 
       if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
         const displayTitle = tab.customTitle || title;
@@ -1047,6 +1197,24 @@ function createTabView(tab) {
       saveState();
       broadcastState();
     }
+  });
+
+  // Page (re)loaded: push current visibility so the new document starts in sync
+  view.webContents.on('dom-ready', () => {
+    sendTabVisibility(tab.id, true);
+  });
+
+  // Renderer crash / OOM kill: without this, Chat/Gmail die silently and stop notifying
+  view.webContents.on('render-process-gone', (_event, details) => {
+    if (details && details.reason === 'clean-exit') return;
+    console.warn(`[Google Suite] Tab ${tab.app} renderer gone (${details && details.reason}), reloading`);
+    setTimeout(() => {
+      if (tabViews.get(tab.id) === view && !view.webContents.isDestroyed()) {
+        try {
+          view.webContents.reload();
+        } catch (_) {}
+      }
+    }, 3000);
   });
 
   // Audio indicators & mute detection
@@ -1106,7 +1274,7 @@ function createTabView(tab) {
       const targetUrl = unwrapGoogleUrl(params.linkURL);
       menuItems.push({
         label: 'Open Link in Default Browser',
-        click: () => shell.openExternal(targetUrl)
+        click: () => safeOpenExternal(targetUrl)
       });
       if (isInternal(targetUrl)) {
         menuItems.push({
@@ -1175,7 +1343,7 @@ function createTab(url = null, appId = null, activate = true, pinned = false, lo
 
   // If an external URL is passed to createTab, open it in default browser instead of creating an empty tab
   if (!isNewTab && !isInternal(targetUrl)) {
-    shell.openExternal(targetUrl);
+    safeOpenExternal(targetUrl);
     return null;
   }
 
@@ -1229,7 +1397,7 @@ function navigateCurrentTab(url, appId = null) {
 
   const targetUrl = unwrapGoogleUrl(url);
   if (!isInternal(targetUrl)) {
-    shell.openExternal(targetUrl);
+    safeOpenExternal(targetUrl);
     return;
   }
 
@@ -1315,6 +1483,7 @@ function setSplitView(tabId = null, direction = 'horizontal', ratio = 0.5) {
   updateBounds();
   saveState();
   broadcastState();
+  syncTabVisibility();
 }
 
 function closeSplitView() {
@@ -1385,6 +1554,7 @@ function activateTab(tabId) {
 
   saveState();
   broadcastState();
+  syncTabVisibility();
 }
 
 function closeTab(tabId) {
@@ -1427,6 +1597,7 @@ function closeTab(tabId) {
   } else {
     saveState();
     broadcastState();
+    syncTabVisibility();
   }
 }
 
@@ -1465,7 +1636,8 @@ function promptRenameTab(tabId) {
     }
   });
 
-  const escapedCurrent = JSON.stringify(currentName);
+  // Escape '<' so a tab title containing </script> cannot break out of the inline script
+  const escapedCurrent = JSON.stringify(currentName).replace(/</g, '\\u003c');
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -1686,7 +1858,7 @@ function showTabMenu(tabId) {
     {
       label: 'Open in default browser',
       click: () => {
-        shell.openExternal(tab.url);
+        safeOpenExternal(tab.url);
         if (!tab.pinned && !tab.locked) closeTab(tabId);
       }
     },
@@ -2176,15 +2348,48 @@ ipcMain.handle('show-app-menu', () => showAppMenu());
 ipcMain.handle('show-tab-menu', (_event, id) => showTabMenu(id));
 ipcMain.handle('show-settings-menu', () => showSettingsMenu());
 
-// Receive notifications from web pages (Gmail, Google Chat, etc.)
-ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
-  let senderTab = null;
+function findTabBySender(sender) {
+  if (!sender) return null;
   for (const [id, view] of tabViews.entries()) {
-    if (view && !view.webContents.isDestroyed() && view.webContents.id === event.sender.id) {
-      senderTab = state.tabs.find((t) => t.id === id);
-      break;
+    if (view && !view.webContents.isDestroyed() && view.webContents.id === sender.id) {
+      return state.tabs.find((t) => t.id === id) || null;
     }
   }
+  return null;
+}
+
+// Initial page visibility requested synchronously by tab-preload.js
+ipcMain.on('gapps-get-visibility', (event) => {
+  const tab = findTabBySender(event.sender);
+  event.returnValue = tab ? computeTabVisible(tab.id) : true;
+});
+
+// Receive notifications from web pages (Gmail, Google Chat, etc.)
+function isTrustedIpcSender(event) {
+  try {
+    const url = (event.senderFrame && event.senderFrame.url) || event.sender.getURL();
+    return isTrustedOrigin(url);
+  } catch (_) {
+    return false;
+  }
+}
+
+function clampString(value, max) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+ipcMain.on('tab-notification', (event, data) => {
+  // Only real Google pages may raise desktop notifications (prevents spoofed
+  // "Gmail • ..." popups from user-hosted or third-party content)
+  if (!isTrustedIpcSender(event)) return;
+  const raw = data || {};
+  const id = clampString(raw.id, 64);
+  const title = clampString(raw.title, 200);
+  const body = clampString(raw.body, 1000);
+  const icon = clampString(raw.icon, 2048);
+  const tag = clampString(raw.tag, 200);
+  const silent = Boolean(raw.silent);
+  const senderTab = findTabBySender(event.sender);
 
   let appId = senderTab ? senderTab.app : null;
   if (!appId) {
@@ -2206,51 +2411,81 @@ ipcMain.on('tab-notification', (event, { title, body, icon, tag }) => {
   }
 
   const targetTab = senderTab || state.tabs.find((t) => t.app === appId);
+  if (targetTab) {
+    targetTab.lastNativeNotificationAt = Date.now();
+  }
 
   // If user is currently actively viewing this exact tab in the focused foreground window,
   // we don't display a desktop notification toast popup
-  const activelyViewed = targetTab && isTabActivelyViewed(targetTab.id);
+  const activelyViewed = Boolean(targetTab && isTabActivelyViewed(targetTab.id));
+  if (activelyViewed) return;
 
-  if (targetTab) {
+  // Unread counts come only from the tab's unread observer (tab-unread-count).
+  // Here we only flag the tab, so apps without a counter (e.g. Calendar) still get a dot.
+  if (targetTab && !targetTab.hasNotification) {
     targetTab.hasNotification = true;
-    targetTab.unreadCount = (targetTab.unreadCount || 0) + 1;
     updateAppBadge();
     broadcastState();
-  } else {
-    updateAppBadge();
   }
 
-  if (!activelyViewed) {
-    showCustomNotification({
-      title,
-      body,
-      icon,
-      tag,
-      appId,
-      tabId: targetTab ? targetTab.id : null
-    });
-  }
+  showCustomNotification({
+    title,
+    body,
+    icon,
+    tag,
+    silent,
+    appId,
+    tabId: targetTab ? targetTab.id : null,
+    pageNotificationId: id || null,
+    sourceWebContents: event.sender
+  });
 });
 
 // User activity in tab
 ipcMain.on('tab-user-active', () => {
-  // We do NOT clear unread notifications on mere clicks or keypresses.
+  // We do NOT clear unread counts on mere clicks or keypresses.
   // The tab's unread badges are cleared only when the web app itself reduces unread count to 0.
 });
 
-// Direct unread badge reporting from tab DOM observer
-ipcMain.on('tab-unread-count', (event, { count, title, body }) => {
-  let senderTab = null;
-  for (const [id, view] of tabViews.entries()) {
-    if (view && !view.webContents.isDestroyed() && view.webContents.id === event.sender.id) {
-      senderTab = state.tabs.find((t) => t.id === id);
-      break;
-    }
-  }
+// Fallback desktop notification when an unread counter increases but the web app
+// did not raise its own notification (e.g. Gmail desktop notifications disabled).
+const FALLBACK_NOTIFICATION_DELAY_MS = 4000;
+const NATIVE_NOTIFICATION_WINDOW_MS = 10000;
+
+function scheduleFallbackNotification(tabId, prevCount) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  const increasedAt = Date.now();
+  if (tab.fallbackNotificationTimer) clearTimeout(tab.fallbackNotificationTimer);
+  tab.fallbackNotificationTimer = setTimeout(() => {
+    const t = state.tabs.find((x) => x.id === tabId);
+    if (!t) return;
+    t.fallbackNotificationTimer = null;
+    if (t.lastNativeNotificationAt && t.lastNativeNotificationAt > increasedAt - NATIVE_NOTIFICATION_WINDOW_MS) return;
+    if (isTabActivelyViewed(tabId)) return;
+    const current = t.unreadCount || 0;
+    if (current <= prevCount) return;
+    const appDef = byId(t.app);
+    const appName = appDef ? appDef.title : 'Google Suite';
+    showCustomNotification({
+      title: '',
+      body: current === 1 ? `1 messaggio non letto in ${appName}` : `${current} messaggi non letti in ${appName}`,
+      tag: 'gapps-unread-summary',
+      appId: t.app,
+      tabId: t.id
+    });
+  }, FALLBACK_NOTIFICATION_DELAY_MS);
+}
+
+// Unread badge reporting from tab DOM observer: single source of truth for unread counts
+ipcMain.on('tab-unread-count', (event, data) => {
+  if (!isTrustedIpcSender(event)) return;
+  const senderTab = findTabBySender(event.sender);
   if (!senderTab) return;
 
+  const { count } = data || {};
   const prevCount = senderTab.unreadCount || 0;
-  const num = typeof count === 'number' ? count : parseInt(count, 10) || 0;
+  const num = Math.min(99999, Math.max(0, typeof count === 'number' ? Math.floor(count) || 0 : parseInt(count, 10) || 0));
 
   if (num === 0) {
     if (senderTab.unreadCount > 0 || senderTab.hasNotification) {
@@ -2262,20 +2497,14 @@ ipcMain.on('tab-unread-count', (event, { count, title, body }) => {
     return;
   }
 
-  // num > 0: update tab unread count and badge
+  if (num === prevCount) return;
+
   senderTab.unreadCount = num;
-  senderTab.hasNotification = true;
   updateAppBadge();
   broadcastState();
 
   if (num > prevCount && !isTabActivelyViewed(senderTab.id)) {
-    const appDef = byId(senderTab.app);
-    showCustomNotification({
-      title: title || (appDef ? appDef.title : 'Nuovo messaggio'),
-      body: body || `${num} notifiche non lette`,
-      appId: senderTab.app,
-      tabId: senderTab.id
-    });
+    scheduleFallbackNotification(senderTab.id, prevCount);
   }
 });
 
@@ -2286,6 +2515,13 @@ app.on('second-instance', (_event, commandLine) => {
     mainWindow.focus();
   }
   handleArgv(commandLine.slice(1));
+});
+
+// Defense in depth for every webContents (including ones created later):
+// no <webview> embedding, no popups unless a view installs its own handler.
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-attach-webview', (e) => e.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 });
 
 app.whenReady().then(async () => {
@@ -2327,43 +2563,41 @@ app.whenReady().then(async () => {
     callback({ requestHeaders: headers });
   });
 
-  // Grant Meet & Google Suite permissions automatically
-  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    if (permission === 'notifications') return true;
-    if (permission === 'media') return true;
-    return true;
+  // Permissions: grant only a whitelist, and only to trusted Google origins
+  // (https://*.google.com). Third-party iframes (ads, embeds in Docs/Gmail) and
+  // user-hosted content (*.googleusercontent.com) get nothing.
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    return isPermissionAllowed(permission, requestingOrigin);
   });
 
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const url = webContents.getURL();
-    if (isInternal(url)) {
-      const allowed = [
-        'notifications',
-        'media',
-        'display-capture',
-        'mediaKeySystem',
-        'clipboard-read',
-        'clipboard-sanitized-write'
-      ];
-      if (allowed.includes(permission)) {
-        return callback(true);
-      }
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const origin =
+      (details && (details.requestingUrl || details.securityOrigin)) ||
+      (webContents && !webContents.isDestroyed() ? webContents.getURL() : '');
+    const allowed = isPermissionAllowed(permission, origin);
+    if (!allowed) {
+      console.warn(`[Google Suite] Denied permission "${permission}" for ${String(origin).slice(0, 120)}`);
     }
-    callback(true);
+    callback(allowed);
   });
 
-  // Setup screen capturer for Google Meet under Linux Wayland/PipeWire
+  // Screen sharing (Google Meet): only for trusted origins, and always let the user
+  // choose what to share. On Wayland the PipeWire portal already shows its own picker.
   if (session.defaultSession.setDisplayMediaRequestHandler) {
-    session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+      const origin =
+        (request && (request.securityOrigin || (request.frame && request.frame.url))) || '';
+      if (!isTrustedOrigin(origin)) {
+        console.warn(`[Google Suite] Denied screen capture for ${String(origin).slice(0, 120)}`);
+        callback({});
+        return;
+      }
+      // Do NOT pass thumbnailSize {0,0}: on Wayland/PipeWire (Electron 33) it makes the
+      // main process SIGSEGV right after the user picks a source in the portal dialog.
       desktopCapturer
         .getSources({ types: ['screen', 'window'] })
-        .then((sources) => {
-          if (sources.length > 0) {
-            callback({ video: sources[0] });
-          } else {
-            callback({});
-          }
-        })
+        .then((sources) => pickDisplaySource(sources))
+        .then((source) => callback(source ? { video: source } : {}))
         .catch(() => callback({}));
     });
   }
@@ -2533,6 +2767,11 @@ app.whenReady().then(async () => {
 
   mainWindow.on('show', updateTrayMenu);
   mainWindow.on('hide', updateTrayMenu);
+
+  // Keep tab page visibility (document.hidden) in sync with the real window state
+  ['show', 'hide', 'minimize', 'restore', 'focus', 'blur'].forEach((evt) => {
+    mainWindow.on(evt, () => syncTabVisibility());
+  });
 
   createTray();
 

@@ -120,9 +120,45 @@ function isInternal(urlOrHost) {
     host.endsWith('.gstatic.com') ||
     host === 'forms.gle' ||
     host === 'g.co' ||
-    (host === 'goo.gl' && pathname.startsWith('/forms')) ||
-    target.startsWith('file://')
+    (host === 'goo.gl' && pathname.startsWith('/forms'))
   );
 }
 
-module.exports = { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl };
+// Strict check for origins that may receive permissions (camera, mic, screen,
+// notifications, clipboard) and talk to the app's notification bridge.
+// Unlike isInternal(), user-hosted content (*.googleusercontent.com) is NOT trusted.
+function isTrustedOrigin(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return host === 'google.com' || host.endsWith('.google.com');
+  } catch (_) {
+    return false;
+  }
+}
+
+// Only these schemes may be handed to the OS (shell.openExternal). Anything else
+// (file:, smb:, custom handlers...) could launch local files or arbitrary programs.
+const SAFE_EXTERNAL_PROTOCOLS = ['http:', 'https:', 'mailto:', 'tel:'];
+
+function isSafeExternalUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    return SAFE_EXTERNAL_PROTOCOLS.includes(new URL(url).protocol);
+  } catch (_) {
+    return false;
+  }
+}
+
+module.exports = {
+  APPS,
+  byId,
+  byHost,
+  detectApp,
+  isInternal,
+  isTrustedOrigin,
+  isSafeExternalUrl,
+  unwrapGoogleUrl
+};
