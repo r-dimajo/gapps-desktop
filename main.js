@@ -701,7 +701,7 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     displayTitle = `${appDef.title} • ${displayTitle}`;
   }
 
-  // Set urgency to 'normal' so KDE Plasma uses its classic auto-expire countdown timer
+  // Let the desktop environment (KDE Plasma / GNOME) manage notification timeout and persist to history tray
   const notification = new Notification({
     title: displayTitle,
     body: body || '',
@@ -710,15 +710,7 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     silent: false
   });
 
-  // KDE classic style: auto-expire after 5 seconds
-  const autoCloseTimer = setTimeout(() => {
-    try {
-      notification.close();
-    } catch (_) {}
-  }, 5000);
-
   notification.on('click', () => {
-    clearTimeout(autoCloseTimer);
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.show();
@@ -729,10 +721,6 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
     } else if (appId) {
       showAndSwitchTo(appId);
     }
-  });
-
-  notification.on('close', () => {
-    clearTimeout(autoCloseTimer);
   });
 
   try {
