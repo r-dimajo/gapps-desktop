@@ -19,8 +19,8 @@
     "dist": "electron-builder --linux deb AppImage"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.google.suite.linux",
@@ -48,14 +48,16 @@
         "AppImage"
       ],
       "icon": "icons/icon.png",
-      "category": "Network;Office;",
+      "category": "Network;Office;Chat;",
       "synopsis": "Google Workspace desktop client for Linux",
       "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)",
       "desktop": {
-        "Name": "Google Suite",
-        "Comment": "Google Workspace desktop client for Linux",
-        "Categories": "Network;Office;Chat;",
-        "StartupWMClass": "google-suite"
+        "entry": {
+          "Name": "Google Suite",
+          "Comment": "Google Workspace desktop client for Linux",
+          "Categories": "Network;Office;Chat;",
+          "StartupWMClass": "google-suite"
+        }
       }
     },
     "deb": {
@@ -70,10 +72,12 @@
         "libgbm1"
       ],
       "desktop": {
-        "Name": "Google Suite",
-        "Comment": "Google Workspace desktop client for Linux",
-        "Categories": "Network;Office;Chat;",
-        "StartupWMClass": "google-suite"
+        "entry": {
+          "Name": "Google Suite",
+          "Comment": "Google Workspace desktop client for Linux",
+          "Categories": "Network;Office;Chat;",
+          "StartupWMClass": "google-suite"
+        }
       }
     }
   }
