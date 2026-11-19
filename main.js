@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const https = require('https');
 const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
 
 // Linux Wayland & hardware flags
@@ -764,6 +765,132 @@ function triggerNotificationForApp(appId, title, body) {
     body,
     appId,
     tabId: targetTab ? targetTab.id : null
+  });
+}
+
+function parseSemver(v) {
+  if (!v || typeof v !== 'string') return [0, 0, 0];
+  const cleaned = v.trim().replace(/^v/i, '');
+  const parts = cleaned.split('.').map((p) => parseInt(p, 10) || 0);
+  while (parts.length < 3) parts.push(0);
+  return parts;
+}
+
+function isNewerVersion(remoteVer, currentVer) {
+  const r = parseSemver(remoteVer);
+  const c = parseSemver(currentVer);
+  for (let i = 0; i < 3; i++) {
+    if (r[i] > c[i]) return true;
+    if (r[i] < c[i]) return false;
+  }
+  return false;
+}
+
+function checkForAppUpdates(interactive = false) {
+  const currentVersion = app.getVersion();
+  const repoOwner = 'r-dimajo';
+  const repoName = 'google-suite-linux';
+  const releasesUrl = `https://github.com/${repoOwner}/${repoName}/releases`;
+  const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
+
+  const req = https.get(
+    apiUrl,
+    {
+      headers: {
+        'User-Agent': `GoogleSuiteLinux/${currentVersion} (Linux; Electron)`
+      },
+      timeout: 6000
+    },
+    (res) => {
+      if (res.statusCode !== 200) {
+        if (interactive && mainWindow && !mainWindow.isDestroyed()) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Controllo aggiornamenti',
+            message: `Versione corrente: v${currentVersion}\nNessun nuovo aggiornamento trovato o archivio rilasci al momento non raggiungibile.`,
+            buttons: ['OK']
+          });
+        }
+        res.resume();
+        return;
+      }
+
+      let rawData = '';
+      res.on('data', (chunk) => {
+        rawData += chunk;
+      });
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(rawData);
+          const latestTag = data.tag_name || data.name || '';
+          const targetUrl = data.html_url || releasesUrl;
+
+          if (latestTag && isNewerVersion(latestTag, currentVersion)) {
+            const displayTag = latestTag.startsWith('v') ? latestTag : `v${latestTag}`;
+            const notif = new Notification({
+              title: `Google Suite • Aggiornamento disponibile`,
+              body: `È disponibile la versione ${displayTag} (versione attuale: v${currentVersion}). Clicca per scaricarla.`,
+              icon: nativeImage.createFromPath(ICON_PATH),
+              urgency: 'normal'
+            });
+
+            notif.on('click', () => {
+              shell.openExternal(targetUrl);
+            });
+
+            try {
+              notif.show();
+            } catch (err) {
+              console.warn('Could not show update notification:', err);
+            }
+
+            if (interactive && mainWindow && !mainWindow.isDestroyed()) {
+              dialog
+                .showMessageBox(mainWindow, {
+                  type: 'info',
+                  title: 'Aggiornamento disponibile',
+                  message: `È disponibile una nuova versione di Google Suite: ${displayTag}\n(versione installata: v${currentVersion})`,
+                  detail: 'Vuoi aprire la pagina delle release per scaricare il pacchetto aggiornato (.deb / AppImage)?',
+                  buttons: ['Apri pagina release', 'Più tardi'],
+                  defaultId: 0,
+                  cancelId: 1
+                })
+                .then((result) => {
+                  if (result.response === 0) {
+                    shell.openExternal(targetUrl);
+                  }
+                });
+            }
+          } else if (interactive && mainWindow && !mainWindow.isDestroyed()) {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Controllo aggiornamenti',
+              message: `Google Suite è aggiornato all'ultima versione (v${currentVersion}).`,
+              buttons: ['OK']
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to parse release response:', e);
+        }
+      });
+    }
+  );
+
+  req.on('error', (err) => {
+    if (interactive && mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Controllo aggiornamenti',
+        message: 'Impossibile verificare la presenza di aggiornamenti. Verifica la connessione a Internet.',
+        buttons: ['OK']
+      });
+    } else {
+      console.warn('Update check failed:', err.message);
+    }
+  });
+
+  req.on('timeout', () => {
+    req.destroy();
   });
 }
 
@@ -1794,6 +1921,12 @@ function showSettingsMenu() {
         });
       }
     },
+    {
+      label: 'Check for updates…',
+      click: () => {
+        checkForAppUpdates(true);
+      }
+    },
     { type: 'separator' },
     {
       label: 'Quit Google Suite',
@@ -2417,6 +2550,11 @@ app.whenReady().then(async () => {
 
   // Handle CLI args
   handleArgv(process.argv.slice(1));
+
+  // Check for new releases on startup (after 4 seconds to allow initial page to load smoothly)
+  setTimeout(() => {
+    checkForAppUpdates(false);
+  }, 4000);
 });
 
 app.on('activate', () => {
