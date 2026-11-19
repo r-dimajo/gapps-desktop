@@ -22,6 +22,10 @@ const crypto = require('crypto');
 const { APPS, byId, byHost, detectApp, isInternal, unwrapGoogleUrl } = require('./apps');
 
 // Linux Wayland & hardware flags
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
 
@@ -670,8 +674,9 @@ function showCustomNotification({ title, body, icon, tag, appId, tabId }) {
   const appDef = byId(appId);
   const appName = appDef ? appDef.title : 'Google Suite';
 
-  // Prefer badged icon (with notification red dot) when notifying, or clean app icon
-  const iconPath = getAppIconPath(appId, true);
+  // Always use the clean, official app icon (WITHOUT notification dot) for desktop notification popups.
+  // The notification dot is reserved for the tab bar and system tray.
+  const iconPath = getAppIconPath(appId, false);
   let notifIcon = iconPath;
   try {
     const img = nativeImage.createFromPath(iconPath);
@@ -769,7 +774,8 @@ function createTabView(tab) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      spellcheck: true
+      spellcheck: true,
+      backgroundThrottling: false
     }
   });
 
@@ -873,12 +879,39 @@ function createTabView(tab) {
     if (title) {
       tab.title = title;
 
-      // Extract unread message count from title (e.g. "Inbox (5) - user@gmail.com" or "(3) Google Chat")
+      // Extract unread message count from title (e.g. "Inbox (5) - user@gmail.com" or "(3) Google Chat" or "* Google Chat")
       const match = title.match(/\(([0-9]+)\)/);
-      const newUnreadCount = match ? parseInt(match[1], 10) : 0;
-      tab.unreadCount = newUnreadCount;
-      if (newUnreadCount === 0) {
+      const starMatch = title.trim().startsWith('*');
+      const prevUnread = tab.unreadCount || 0;
+      const newUnreadCount = match ? parseInt(match[1], 10) : (starMatch ? Math.max(1, prevUnread) : 0);
+      
+      const isWindowActive =
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        mainWindow.isVisible() &&
+        mainWindow.isFocused();
+      const isViewingThisTab = Boolean(tab.id === state.active && isWindowActive);
+
+      if (isViewingThisTab) {
+        tab.unreadCount = 0;
         tab.hasNotification = false;
+      } else {
+        tab.unreadCount = newUnreadCount;
+        if (newUnreadCount > 0) {
+          tab.hasNotification = true;
+          // If unread messages arrived while tab is in background or window is minimized/unfocused
+          if (newUnreadCount > prevUnread) {
+            const appDef = byId(tab.app);
+            showCustomNotification({
+              title: title,
+              body: `${newUnreadCount} non letti in ${appDef ? appDef.title : 'Google Suite'}`,
+              appId: tab.app,
+              tabId: tab.id
+            });
+          }
+        } else {
+          tab.hasNotification = false;
+        }
       }
       updateAppBadge();
 
@@ -2089,6 +2122,50 @@ ipcMain.on('tab-user-active', (event) => {
       }
       break;
     }
+  }
+});
+
+// Direct unread badge reporting from tab DOM observer
+ipcMain.on('tab-unread-count', (event, { count, title, body }) => {
+  let senderTab = null;
+  for (const [id, view] of tabViews.entries()) {
+    if (view && !view.webContents.isDestroyed() && view.webContents.id === event.sender.id) {
+      senderTab = state.tabs.find((t) => t.id === id);
+      break;
+    }
+  }
+  if (!senderTab) return;
+
+  const prevCount = senderTab.unreadCount || 0;
+  const num = typeof count === 'number' ? count : parseInt(count, 10) || 0;
+
+  const isWindowActive =
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible() &&
+    mainWindow.isFocused();
+  const isViewingThisTab = Boolean(senderTab.id === state.active && isWindowActive);
+
+  if (isViewingThisTab) {
+    if (senderTab.unreadCount > 0 || senderTab.hasNotification) {
+      clearTabNotification(senderTab.id);
+    }
+    return;
+  }
+
+  senderTab.unreadCount = num;
+  senderTab.hasNotification = num > 0;
+  updateAppBadge();
+  broadcastState();
+
+  if (num > prevCount) {
+    const appDef = byId(senderTab.app);
+    showCustomNotification({
+      title: title || (appDef ? appDef.title : 'Nuovo messaggio'),
+      body: body || `${num} notifiche non lette`,
+      appId: senderTab.app,
+      tabId: senderTab.id
+    });
   }
 });
 

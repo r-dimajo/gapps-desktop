@@ -22,6 +22,7 @@ try {
 // Expose safe bridge to main world
 contextBridge.exposeInMainWorld('__gappsNotify', {
   send: (data) => ipcRenderer.send('tab-notification', data),
+  sendUnreadCount: (data) => ipcRenderer.send('tab-unread-count', data),
   userActive: reportUserActive
 });
 
@@ -107,6 +108,72 @@ try {
           'storage',
           'unlimitedStorage'
         ];
+      } catch (_) {}
+
+      // Keep background push events and WebSockets alive by pretending document is never frozen/hidden
+      try {
+        Object.defineProperty(document, 'hidden', {
+          get: () => false,
+          configurable: true
+        });
+        Object.defineProperty(document, 'visibilityState', {
+          get: () => 'visible',
+          configurable: true
+        });
+      } catch (_) {}
+
+      // DOM MutationObserver for real-time unread badges (Google Chat, Gmail, etc.)
+      let lastReportedUnread = 0;
+      function checkUnreadDOM() {
+        try {
+          // Check document title e.g. "(3) Google Chat" or "* Google Chat"
+          const title = document.title || '';
+          const match = title.match(/\\(([0-9]+)\\)/);
+          let count = match ? parseInt(match[1], 10) : 0;
+
+          // If no count in title, check common Google Chat / Gmail unread badge DOM elements
+          if (count === 0) {
+            // Google Chat unread badge element or aria-label
+            const chatBadges = document.querySelectorAll('[aria-label*="unread" i], [data-unread-count]');
+            for (let i = 0; i < chatBadges.length; i++) {
+              const el = chatBadges[i];
+              const attr = el.getAttribute('data-unread-count') || el.getAttribute('aria-label') || '';
+              const m = attr.match(/([0-9]+)/);
+              if (m) {
+                count += parseInt(m[1], 10);
+              } else if (/unread/i.test(attr)) {
+                count += 1;
+              }
+            }
+          }
+
+          if (count !== lastReportedUnread) {
+            lastReportedUnread = count;
+            if (window.__gappsNotify && window.__gappsNotify.sendUnreadCount) {
+              window.__gappsNotify.sendUnreadCount({ count, title });
+            }
+          }
+        } catch (_) {}
+      }
+
+      try {
+        const observer = new MutationObserver(checkUnreadDOM);
+        if (document.head) {
+          const titleEl = document.querySelector('title');
+          if (titleEl) {
+            observer.observe(titleEl, { subtree: true, characterData: true, childList: true });
+          }
+        }
+        if (document.body) {
+          observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-label', 'data-unread-count'] });
+        } else {
+          document.addEventListener('DOMContentLoaded', () => {
+            if (document.body) {
+              observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-label', 'data-unread-count'] });
+            }
+          });
+        }
+        setInterval(checkUnreadDOM, 3000);
       } catch (_) {}
     })();
   `);
