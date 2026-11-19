@@ -123,20 +123,24 @@ try {
       } catch (_) {}
 
       // DOM MutationObserver for real-time unread badges (Google Chat, Gmail, etc.)
-      let lastReportedUnread = 0;
+      let lastReportedUnread = -1;
       function checkUnreadDOM() {
         try {
-          // Check document title e.g. "(3) Google Chat" or "* Google Chat"
           const title = document.title || '';
           const match = title.match(/\\(([0-9]+)\\)/);
           let count = match ? parseInt(match[1], 10) : 0;
 
-          // If no count in title, check common Google Chat / Gmail unread badge DOM elements
-          if (count === 0) {
+          // If count not in title, check if title explicitly starts with '*' (common in chat apps)
+          const hasStar = title.trim().startsWith('*');
+
+          // Check common Google Chat / Gmail unread badge DOM elements
+          if (count === 0 && !hasStar) {
             // Google Chat unread badge element or aria-label
             const chatBadges = document.querySelectorAll('[aria-label*="unread" i], [data-unread-count]');
             for (let i = 0; i < chatBadges.length; i++) {
               const el = chatBadges[i];
+              // Avoid counting hidden/invisible elements
+              if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
               const attr = el.getAttribute('data-unread-count') || el.getAttribute('aria-label') || '';
               const m = attr.match(/([0-9]+)/);
               if (m) {
@@ -145,9 +149,11 @@ try {
                 count += 1;
               }
             }
+          } else if (count === 0 && hasStar) {
+            count = 1;
           }
 
-          if (count > 0 && count !== lastReportedUnread) {
+          if (count !== lastReportedUnread) {
             lastReportedUnread = count;
             if (window.__gappsNotify && window.__gappsNotify.sendUnreadCount) {
               window.__gappsNotify.sendUnreadCount({ count, title });
