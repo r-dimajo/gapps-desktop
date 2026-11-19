@@ -24,7 +24,7 @@
   },
   "build": {
     "appId": "com.google.suite.linux",
-    "productName": "Google Suite",
+    "productName": "google-suite",
     "executableName": "google-suite",
     "artifactName": "${name}_${version}_${arch}.${ext}",
     "directories": {
@@ -50,7 +50,13 @@
       "icon": "icons/icon.png",
       "category": "Network;Office;",
       "synopsis": "Google Workspace desktop client for Linux",
-      "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)"
+      "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)",
+      "desktop": {
+        "Name": "Google Suite",
+        "Comment": "Google Workspace desktop client for Linux",
+        "Categories": "Network;Office;Chat;",
+        "StartupWMClass": "google-suite"
+      }
     },
     "deb": {
       "packageName": "google-suite-linux",
@@ -64,6 +70,9 @@
         "libgbm1"
       ],
       "desktop": {
+        "Name": "Google Suite",
+        "Comment": "Google Workspace desktop client for Linux",
+        "Categories": "Network;Office;Chat;",
         "StartupWMClass": "google-suite"
       }
     }

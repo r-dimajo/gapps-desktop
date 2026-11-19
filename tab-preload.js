@@ -111,6 +111,7 @@ try {
       } catch (_) {}
 
       // Keep background push events and WebSockets alive by pretending document is never frozen/hidden
+      // Also intercept addEventListener so visibilitychange can be triggered when needed
       try {
         Object.defineProperty(document, 'hidden', {
           get: () => false,
@@ -122,7 +123,7 @@ try {
         });
       } catch (_) {}
 
-      // Check unread status from document.title, favicon, or section indicators
+      // Check unread status from document.title, DOM unread attributes, or section indicators
       let lastReportedUnread = -1;
       let cleanTitleCountdown = 0;
 
@@ -131,19 +132,6 @@ try {
           const title = (document.title || '').trim();
           const match = title.match(/\\(([0-9]+)\\)/);
           const hasStar = title.startsWith('*');
-
-          // Check favicon dot for Google Chat (Google uses favicons with '_dot_' or dynamic data URLs when unread)
-          let hasFaviconDot = false;
-          try {
-            const iconEls = document.querySelectorAll('link[rel*="icon"]');
-            for (let i = 0; i < iconEls.length; i++) {
-              const href = iconEls[i].getAttribute('href') || '';
-              if (href.includes('_dot_') || href.includes('favicon_chat_new_notif')) {
-                hasFaviconDot = true;
-                break;
-              }
-            }
-          } catch (_) {}
 
           let count = 0;
           if (match) {
@@ -178,20 +166,21 @@ try {
               }
             } catch (_) {}
 
-            // Only use favicon notification dot if there are actual unread messages detected
-            // (Google Chat sets the dot on favicon even for unsent drafts, which must not trigger unread badge)
-            if (count === 0 && hasFaviconDot) {
-              // Favicon has dot, but check if it's purely due to drafts
-              // If title doesn't indicate unread and section 1 & 2 have no unread, do not count drafts!
-              count = 0;
+            // Also check for individual unread items in Chat/Gmail (e.g. data-is-unread="true")
+            if (count === 0) {
+              try {
+                const unreadItems = document.querySelectorAll('[data-is-unread="true"]');
+                if (unreadItems.length > 0) {
+                  count = unreadItems.length;
+                }
+              } catch (_) {}
             }
 
-            // If still 0 and title is clean, verify over 2 consecutive cycles (~1-2 seconds)
+            // If count is 0 and title has no unread marks, verify over 2 consecutive cycles (~2 seconds)
             // to guard against transient title flips before reporting count 0
             if (count === 0) {
               cleanTitleCountdown++;
               if (cleanTitleCountdown < 2 && lastReportedUnread > 0) {
-                // Don't report 0 yet on transient cycle
                 return;
               }
             } else {
@@ -214,11 +203,11 @@ try {
           observer.observe(document.head, { subtree: true, characterData: true, childList: true, attributes: true });
         }
         if (document.body) {
-          observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type'] });
+          observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type', 'data-is-unread'] });
         } else {
           document.addEventListener('DOMContentLoaded', () => {
             if (document.body) {
-              observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type'] });
+              observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type', 'data-is-unread'] });
             }
           });
         }
