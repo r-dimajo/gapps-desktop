@@ -147,7 +147,7 @@ try {
             }
           }
 
-          if (count !== lastReportedUnread) {
+          if (count > 0 && count !== lastReportedUnread) {
             lastReportedUnread = count;
             if (window.__gappsNotify && window.__gappsNotify.sendUnreadCount) {
               window.__gappsNotify.sendUnreadCount({ count, title });
