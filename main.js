@@ -895,6 +895,20 @@ function createTabView(tab) {
       } else if (starMatch) {
         tab.unreadCount = Math.max(1, prevUnread);
         tab.hasNotification = true;
+      } else {
+        // Title has neither numbers like (5) nor '*'
+        // If unreadCount was positive or notification was set, and the tab is actively viewed or reports clean title,
+        // we can safely clear if title has stabilized to standard format (e.g. "Google Chat" or "Inbox - user@gmail.com")
+        const isStandardCleanTitle =
+          title === 'Google Chat' ||
+          title.startsWith('Google Chat') ||
+          title.includes(' - ') ||
+          title === 'Gmail';
+
+        if (isStandardCleanTitle && isTabActivelyViewed(tab.id)) {
+          tab.unreadCount = 0;
+          tab.hasNotification = false;
+        }
       }
 
       updateAppBadge();

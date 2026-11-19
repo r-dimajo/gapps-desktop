@@ -122,35 +122,72 @@ try {
         });
       } catch (_) {}
 
-      // DOM MutationObserver for real-time unread badges (Google Chat, Gmail, etc.)
+      // Check unread status from document.title, favicon, or section indicators
       let lastReportedUnread = -1;
+      let cleanTitleCountdown = 0;
+
       function checkUnreadDOM() {
         try {
-          const title = document.title || '';
+          const title = (document.title || '').trim();
           const match = title.match(/\\(([0-9]+)\\)/);
-          let count = match ? parseInt(match[1], 10) : 0;
+          const hasStar = title.startsWith('*');
 
-          // If count not in title, check if title explicitly starts with '*' (common in chat apps)
-          const hasStar = title.trim().startsWith('*');
-
-          // Check common Google Chat / Gmail unread badge DOM elements
-          if (count === 0 && !hasStar) {
-            // Google Chat unread badge element or aria-label
-            const chatBadges = document.querySelectorAll('[aria-label*="unread" i], [data-unread-count]');
-            for (let i = 0; i < chatBadges.length; i++) {
-              const el = chatBadges[i];
-              // Avoid counting hidden/invisible elements
-              if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
-              const attr = el.getAttribute('data-unread-count') || el.getAttribute('aria-label') || '';
-              const m = attr.match(/([0-9]+)/);
-              if (m) {
-                count += parseInt(m[1], 10);
-              } else if (/unread/i.test(attr)) {
-                count += 1;
+          // Check favicon dot for Google Chat (Google uses favicons with '_dot_' or dynamic data URLs when unread)
+          let hasFaviconDot = false;
+          try {
+            const iconEls = document.querySelectorAll('link[rel*="icon"]');
+            for (let i = 0; i < iconEls.length; i++) {
+              const href = iconEls[i].getAttribute('href') || '';
+              if (href.includes('_dot_') || href.includes('favicon_chat_new_notif')) {
+                hasFaviconDot = true;
+                break;
               }
             }
-          } else if (count === 0 && hasStar) {
+          } catch (_) {}
+
+          let count = 0;
+          if (match) {
+            count = parseInt(match[1], 10);
+            cleanTitleCountdown = 0;
+          } else if (hasStar) {
             count = 1;
+            cleanTitleCountdown = 0;
+          } else if (hasFaviconDot) {
+            count = 1;
+            cleanTitleCountdown = 0;
+          } else {
+            // Check Google Chat unread section count (header toggle aria-labelledby has second ID with unread count)
+            try {
+              const sectionEls = document.querySelectorAll('div[data-section-type]');
+              for (let i = 0; i < sectionEls.length; i++) {
+                const toggle = sectionEls[i].querySelector('[aria-labelledby]');
+                if (toggle) {
+                  const labelledBy = toggle.getAttribute('aria-labelledby') || '';
+                  const ids = labelledBy.trim().split(/\s+/);
+                  if (ids.length >= 2) {
+                    const countEl = document.getElementById(ids[1]);
+                    if (countEl && countEl.textContent) {
+                      const c = parseInt(countEl.textContent.trim(), 10);
+                      if (!isNaN(c) && c > 0) {
+                        count += c;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (_) {}
+
+            // If still 0 and title is clean, verify over 2 consecutive cycles (~1-2 seconds)
+            // to guard against transient title flips before reporting count 0
+            if (count === 0) {
+              cleanTitleCountdown++;
+              if (cleanTitleCountdown < 2 && lastReportedUnread > 0) {
+                // Don't report 0 yet on transient cycle
+                return;
+              }
+            } else {
+              cleanTitleCountdown = 0;
+            }
           }
 
           if (count !== lastReportedUnread) {
@@ -165,21 +202,18 @@ try {
       try {
         const observer = new MutationObserver(checkUnreadDOM);
         if (document.head) {
-          const titleEl = document.querySelector('title');
-          if (titleEl) {
-            observer.observe(titleEl, { subtree: true, characterData: true, childList: true });
-          }
+          observer.observe(document.head, { subtree: true, characterData: true, childList: true, attributes: true });
         }
         if (document.body) {
-          observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-label', 'data-unread-count'] });
+          observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type'] });
         } else {
           document.addEventListener('DOMContentLoaded', () => {
             if (document.body) {
-              observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-label', 'data-unread-count'] });
+              observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-labelledby', 'data-section-type'] });
             }
           });
         }
-        setInterval(checkUnreadDOM, 3000);
+        setInterval(checkUnreadDOM, 1000);
       } catch (_) {}
     })();
   `);
