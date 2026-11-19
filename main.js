@@ -839,7 +839,144 @@ function pickDisplaySource(sources) {
 const activeNotifications = new Map();
 const MAX_ACTIVE_NOTIFICATIONS = 100;
 
-function showCustomNotification({
+// Icons supplied by the page (Chat: avatar of the person / space) are downloaded
+// in the main process and cached. Only Google image hosts and data:image URLs.
+const notificationIconCache = new Map();
+const MAX_NOTIFICATION_ICON_CACHE = 100;
+const NOTIFICATION_ICON_TIMEOUT_MS = 2500;
+const NOTIFICATION_ICON_MAX_BYTES = 2 * 1024 * 1024;
+const NOTIFICATION_ICON_MAX_SIZE = 256;
+
+function isAllowedNotificationIconUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return (
+      host.endsWith('.googleusercontent.com') ||
+      host.endsWith('.gstatic.com') ||
+      host.endsWith('.ggpht.com') ||
+      host === 'google.com' ||
+      host.endsWith('.google.com')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function normalizeNotificationIcon(img) {
+  if (!img || img.isEmpty()) return null;
+  const { width, height } = img.getSize();
+  let sized = img;
+  if (width > NOTIFICATION_ICON_MAX_SIZE || height > NOTIFICATION_ICON_MAX_SIZE) {
+    const scale = NOTIFICATION_ICON_MAX_SIZE / Math.max(width, height);
+    sized = img.resize({
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+      quality: 'best'
+    });
+  }
+  return makeCircularIcon(sized);
+}
+
+// Center-crop to a square and apply an anti-aliased circular alpha mask, so avatars
+// show up as circles in the desktop notification (like in Chat itself).
+function makeCircularIcon(img) {
+  try {
+    const { width, height } = img.getSize();
+    const side = Math.min(width, height);
+    if (side <= 0) return img;
+    const square =
+      width === height
+        ? img
+        : img.crop({
+            x: Math.floor((width - side) / 2),
+            y: Math.floor((height - side) / 2),
+            width: side,
+            height: side
+          });
+    const { width: w, height: h } = square.getSize();
+    const bitmap = Buffer.from(square.toBitmap());
+    if (bitmap.length !== w * h * 4) return img;
+
+    const radius = Math.min(w, h) / 2;
+    const cx = w / 2;
+    const cy = h / 2;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dx = x + 0.5 - cx;
+        const dy = y + 0.5 - cy;
+        const coverage = Math.max(0, Math.min(1, radius - Math.sqrt(dx * dx + dy * dy) + 0.5));
+        if (coverage >= 1) continue;
+        // Skia bitmaps are premultiplied: scale color channels together with alpha
+        const i = (y * w + x) * 4;
+        bitmap[i] = Math.round(bitmap[i] * coverage);
+        bitmap[i + 1] = Math.round(bitmap[i + 1] * coverage);
+        bitmap[i + 2] = Math.round(bitmap[i + 2] * coverage);
+        bitmap[i + 3] = Math.round(bitmap[i + 3] * coverage);
+      }
+    }
+    const circle = nativeImage.createFromBitmap(bitmap, { width: w, height: h });
+    return circle.isEmpty() ? img : circle;
+  } catch (_) {
+    return img;
+  }
+}
+
+function cacheNotificationIcon(url, img) {
+  notificationIconCache.delete(url);
+  notificationIconCache.set(url, img);
+  while (notificationIconCache.size > MAX_NOTIFICATION_ICON_CACHE) {
+    notificationIconCache.delete(notificationIconCache.keys().next().value);
+  }
+}
+
+async function resolveNotificationIcon(url) {
+  if (typeof url !== 'string' || !url) return null;
+
+  if (url.startsWith('data:image/')) {
+    if (url.length > NOTIFICATION_ICON_MAX_BYTES * 1.4) return null;
+    try {
+      return normalizeNotificationIcon(nativeImage.createFromDataURL(url));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  if (!isAllowedNotificationIconUrl(url)) return null;
+  if (notificationIconCache.has(url)) {
+    const cached = notificationIconCache.get(url);
+    cacheNotificationIcon(url, cached);
+    return cached;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NOTIFICATION_ICON_TIMEOUT_MS);
+  try {
+    // Session fetch carries the user's Google cookies (private avatars).
+    // Ask for PNG/JPEG: nativeImage cannot decode WebP/SVG.
+    const res = await session.defaultSession.fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'image/png,image/jpeg;q=0.9,*/*;q=0.1' }
+    });
+    if (!res.ok || (res.url && !isAllowedNotificationIconUrl(res.url))) return null;
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('image/')) return null;
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (declared > NOTIFICATION_ICON_MAX_BYTES) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > NOTIFICATION_ICON_MAX_BYTES) return null;
+    const img = normalizeNotificationIcon(nativeImage.createFromBuffer(buf));
+    if (img) cacheNotificationIcon(url, img);
+    return img;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function showCustomNotification({
   title,
   body,
   icon,
@@ -855,16 +992,19 @@ function showCustomNotification({
   const appDef = byId(appId);
   const appName = appDef ? appDef.title : 'Google Suite';
 
-  // Always use the clean, official app icon (WITHOUT notification dot) for desktop notification popups.
-  // The notification dot is reserved for the tab bar and system tray.
-  const iconPath = getAppIconPath(appId, false);
-  let notifIcon = iconPath;
-  try {
-    const img = nativeImage.createFromPath(iconPath);
-    if (!img.isEmpty()) {
-      notifIcon = img;
-    }
-  } catch (_) {}
+  // Prefer the icon supplied by the web app (Chat: avatar of the conversation),
+  // fall back to the clean official app icon (WITHOUT notification dot).
+  let notifIcon = await resolveNotificationIcon(icon);
+  if (!notifIcon) {
+    const iconPath = getAppIconPath(appId, false);
+    notifIcon = iconPath;
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (!img.isEmpty()) {
+        notifIcon = img;
+      }
+    } catch (_) {}
+  }
 
   // Format custom title & branding per app
   let displayTitle = title || appName;
@@ -2386,7 +2526,11 @@ ipcMain.on('tab-notification', (event, data) => {
   const id = clampString(raw.id, 64);
   const title = clampString(raw.title, 200);
   const body = clampString(raw.body, 1000);
-  const icon = clampString(raw.icon, 2048);
+  // data:image icons can be large; truncating them would just corrupt the image
+  const icon =
+    typeof raw.icon === 'string' && raw.icon.startsWith('data:image/')
+      ? (raw.icon.length <= 512 * 1024 ? raw.icon : '')
+      : clampString(raw.icon, 2048);
   const tag = clampString(raw.tag, 200);
   const silent = Boolean(raw.silent);
   const senderTab = findTabBySender(event.sender);
