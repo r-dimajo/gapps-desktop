@@ -152,13 +152,14 @@ try {
           } else if (hasStar) {
             count = 1;
             cleanTitleCountdown = 0;
-          } else if (hasFaviconDot) {
-            count = 1;
-            cleanTitleCountdown = 0;
           } else {
-            // Check Google Chat unread section count (header toggle aria-labelledby has second ID with unread count)
+            // Check Google Chat unread section count (excluding shortcuts/drafts)
+            // Section types in Google Chat:
+            // "1" = Direct messages
+            // "2" = Spaces
+            // "10" = Shortcuts (includes Drafts, Mentions, etc. - drafts MUST NOT count as unread!)
             try {
-              const sectionEls = document.querySelectorAll('div[data-section-type]');
+              const sectionEls = document.querySelectorAll('div[data-section-type="1"], div[data-section-type="2"]');
               for (let i = 0; i < sectionEls.length; i++) {
                 const toggle = sectionEls[i].querySelector('[aria-labelledby]');
                 if (toggle) {
@@ -176,6 +177,14 @@ try {
                 }
               }
             } catch (_) {}
+
+            // Only use favicon notification dot if there are actual unread messages detected
+            // (Google Chat sets the dot on favicon even for unsent drafts, which must not trigger unread badge)
+            if (count === 0 && hasFaviconDot) {
+              // Favicon has dot, but check if it's purely due to drafts
+              // If title doesn't indicate unread and section 1 & 2 have no unread, do not count drafts!
+              count = 0;
+            }
 
             // If still 0 and title is clean, verify over 2 consecutive cycles (~1-2 seconds)
             // to guard against transient title flips before reporting count 0
