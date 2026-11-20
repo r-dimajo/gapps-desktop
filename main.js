@@ -134,6 +134,68 @@ const earlyGpu = readEarlyGpuMode();
 const activeGpuMode = GPU_MODES.includes(earlyGpu.mode) ? earlyGpu.mode : 'auto';
 const gpuModeSource = earlyGpu.source;
 
+// Safety net: if a non-default graphics mode makes the GPU process crash repeatedly
+// (e.g. XWayland on some hybrid GPUs), go back to Automatic so the user is never
+// stuck. The settings file is patched directly: in-memory settings may not be
+// loaded yet when the first GPU crash happens.
+const GPU_CRASH_WINDOW_MS = 60000;
+const GPU_CRASH_LIMIT = 2;
+let gpuCrashTimes = [];
+let gpuModeReverted = false;
+
+function revertGpuModeToAuto() {
+  try {
+    const data = fs.existsSync(SETTINGS_FILE) ? JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) : {};
+    data.gpu_mode = 'auto';
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to reset graphics mode:', err);
+  }
+  if (typeof settings === 'object' && settings) settings.gpu_mode = 'auto';
+}
+
+app.on('child-process-gone', (_event, details) => {
+  if (!details || details.type !== 'GPU' || details.reason === 'clean-exit') return;
+  if (activeGpuMode === 'auto' || gpuModeReverted) return;
+  const now = Date.now();
+  gpuCrashTimes = gpuCrashTimes.filter((t) => now - t < GPU_CRASH_WINDOW_MS);
+  gpuCrashTimes.push(now);
+  if (gpuCrashTimes.length < GPU_CRASH_LIMIT) return;
+
+  gpuModeReverted = true;
+  const fromSettings = gpuModeSource === 'settings';
+  if (fromSettings) revertGpuModeToAuto();
+  console.warn(`[Google Suite] GPU process crashed repeatedly in graphics mode "${activeGpuMode}"` +
+    (fromSettings ? ', reset to "auto"' : ` (forced by ${gpuModeSource}, remove it to go back to "auto")`));
+
+  app.whenReady().then(() => {
+    const message = fromSettings
+      ? `The graphics mode "${activeGpuMode}" made the GPU crash. It has been reset to Automatic.`
+      : `The graphics mode "${activeGpuMode}" (set via ${gpuModeSource}) made the GPU crash. Remove it to go back to Automatic.`;
+    const opts = {
+      type: 'warning',
+      title: 'Graphics compatibility',
+      message,
+      buttons: fromSettings ? ['Restart now', 'Later'] : ['OK'],
+      defaultId: 0,
+      cancelId: fromSettings ? 1 : 0
+    };
+    const win = typeof mainWindow !== 'undefined' && mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts))
+      .then(({ response }) => {
+        if (!fromSettings || response !== 0) return;
+        try {
+          saveStateSync();
+        } catch (_) {}
+        app.isQuitting = true;
+        app.relaunch();
+        app.quit();
+      })
+      .catch(() => {});
+  });
+});
+
 if (process.platform === 'linux') {
   if (activeGpuMode === 'software-compositing') {
     // Compose the window on the CPU; pages still use the GPU (WebGL, video)
@@ -2213,7 +2275,7 @@ function showSettingsMenu() {
         ...[
           ['auto', 'Automatic (recommended)'],
           ['software-compositing', 'Software compositing (window not refreshing)'],
-          ['x11', 'Use X11 / XWayland instead of Wayland'],
+          ['x11', 'Use X11 / XWayland instead of Wayland (experimental)'],
           ['no-gpu', 'Disable hardware acceleration']
         ].map(([mode, label]) => ({
           label,
