@@ -3373,6 +3373,11 @@ app.whenReady().then(async () => {
   ['show', 'hide', 'minimize', 'restore', 'focus', 'blur'].forEach((evt) => {
     mainWindow.on(evt, () => syncTabVisibility());
   });
+  // Safety net: on Wayland the compositor can suspend/resume a fully covered window
+  // without every transition producing an event. Only changes are sent to tabs.
+  setInterval(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) syncTabVisibility();
+  }, 5000);
 
   createTray();
 
