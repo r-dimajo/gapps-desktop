@@ -108,6 +108,43 @@ const VERTICAL_TABBAR_WIDTH = 210;
 const CONFIG_DIR = path.join(app.getPath('userData'));
 const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
+
+// ---------------------------------------------------------------------------
+// Graphics compatibility mode (opt-in workarounds for GPU/compositor issues, e.g.
+// hybrid AMD + NVIDIA laptops on Wayland where the window stops repainting).
+// Priority: --gpu-mode=<mode> CLI flag > GAPPS_GPU_MODE env var > settings.gpu_mode.
+// Must be applied before the app is ready.
+// ---------------------------------------------------------------------------
+const GPU_MODES = ['auto', 'software-compositing', 'x11', 'no-gpu'];
+
+function readEarlyGpuMode() {
+  const cli = process.argv.find((a) => a.startsWith('--gpu-mode='));
+  if (cli) return { mode: cli.slice('--gpu-mode='.length), source: 'command line' };
+  if (process.env.GAPPS_GPU_MODE) return { mode: process.env.GAPPS_GPU_MODE, source: 'GAPPS_GPU_MODE' };
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (data && data.gpu_mode) return { mode: data.gpu_mode, source: 'settings' };
+    }
+  } catch (_) {}
+  return { mode: 'auto', source: 'default' };
+}
+
+const earlyGpu = readEarlyGpuMode();
+const activeGpuMode = GPU_MODES.includes(earlyGpu.mode) ? earlyGpu.mode : 'auto';
+const gpuModeSource = earlyGpu.source;
+
+if (process.platform === 'linux') {
+  if (activeGpuMode === 'software-compositing') {
+    // Compose the window on the CPU; pages still use the GPU (WebGL, video)
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+  } else if (activeGpuMode === 'x11') {
+    // Run through XWayland instead of native Wayland
+    app.commandLine.appendSwitch('ozone-platform', 'x11');
+  } else if (activeGpuMode === 'no-gpu') {
+    app.disableHardwareAcceleration();
+  }
+}
 const ICON_PATH = path.join(__dirname, 'icons', 'icon.png');
 const ICONS_DIR = path.join(__dirname, 'icons', 'apps');
 const NEW_TAB_URL = 'file://' + path.join(__dirname, 'newtab', 'index.html');
@@ -135,6 +172,7 @@ let settings = {
   tab_layout: 'horizontal', // 'horizontal' | 'vertical'
   desktop_theme: 'auto', // 'auto' | 'gnome' | 'kde'
   close_action: 'tray', // 'tray' | 'quit'
+  gpu_mode: 'auto', // 'auto' | 'software-compositing' | 'x11' | 'no-gpu'
   window_bounds: null
 };
 
@@ -2102,6 +2140,30 @@ function toggleTabLayout() {
   setTabLayout(settings.tab_layout === 'vertical' ? 'horizontal' : 'vertical');
 }
 
+function setGpuMode(mode) {
+  if (!GPU_MODES.includes(mode)) return;
+  if ((settings.gpu_mode || 'auto') === mode) return;
+  settings.gpu_mode = mode;
+  saveSettings();
+  dialog
+    .showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Graphics compatibility',
+      message: 'Restart Google Suite to apply the new graphics mode.',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    .then(({ response }) => {
+      if (response !== 0) return;
+      saveStateSync();
+      app.isQuitting = true;
+      app.relaunch();
+      app.quit();
+    })
+    .catch(() => {});
+}
+
 function showSettingsMenu() {
   const detected = getDesktopEnvironment() === 'gnome' ? 'GNOME' : 'KDE Plasma';
   const template = [
@@ -2142,6 +2204,30 @@ function showSettingsMenu() {
           type: 'radio',
           checked: settings.desktop_theme === 'kde',
           click: () => setDesktopTheme('kde')
+        }
+      ]
+    },
+    {
+      label: 'Graphics compatibility',
+      submenu: [
+        ...[
+          ['auto', 'Automatic (recommended)'],
+          ['software-compositing', 'Software compositing (window not refreshing)'],
+          ['x11', 'Use X11 / XWayland instead of Wayland'],
+          ['no-gpu', 'Disable hardware acceleration']
+        ].map(([mode, label]) => ({
+          label,
+          type: 'radio',
+          checked: (settings.gpu_mode || 'auto') === mode,
+          click: () => setGpuMode(mode)
+        })),
+        { type: 'separator' },
+        {
+          label:
+            gpuModeSource === 'settings' || gpuModeSource === 'default'
+              ? `Active now: ${activeGpuMode}`
+              : `Active now: ${activeGpuMode} (forced by ${gpuModeSource})`,
+          enabled: false
         }
       ]
     },
@@ -2926,7 +3012,7 @@ app.whenReady().then(async () => {
     mainWindow.focus();
   }
 
-  console.log(`[Google Suite] App ready (Theme: ${getEffectiveTheme().toUpperCase()} | Window visible: ${mainWindow.isVisible()})`);
+  console.log(`[Google Suite] App ready (Theme: ${getEffectiveTheme().toUpperCase()} | Window visible: ${mainWindow.isVisible()} | GPU mode: ${activeGpuMode} via ${gpuModeSource})`);
   if (isGnome) {
     console.log(`[Google Suite] GNOME Note: GNOME Shell does not display tray icons by default.`);
   }
