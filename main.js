@@ -876,7 +876,7 @@ function normalizeNotificationIcon(img) {
       quality: 'best'
     });
   }
-  return makeCircularIcon(sized);
+  return sized;
 }
 
 // Center-crop to a square and apply an anti-aliased circular alpha mask, so avatars
@@ -931,7 +931,8 @@ function cacheNotificationIcon(url, img) {
   }
 }
 
-async function resolveNotificationIcon(url) {
+// Download (or decode) a page-supplied image, size-limited and cached (raw, not masked)
+async function loadNotificationImage(url) {
   if (typeof url !== 'string' || !url) return null;
 
   if (url.startsWith('data:image/')) {
@@ -976,6 +977,168 @@ async function resolveNotificationIcon(url) {
   }
 }
 
+async function resolveNotificationIcon(url) {
+  const img = await loadNotificationImage(url);
+  return img ? makeCircularIcon(img) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Composite icons for Google Chat (premultiplied BGRA canvas, alpha "over")
+//   dm    -> sender avatar in a circle
+//   space -> space emoji/image in a circle + small sender avatar bottom-right
+//   group -> participants' avatars in a grid (like Chat's sidebar)
+// ---------------------------------------------------------------------------
+const CHAT_ICON_SIZE = 128;
+const CHAT_EMOJI_BG = [0xed, 0xea, 0xe8, 0xff]; // light grey (#e8eaed), BGRA
+const WHITE = [0xff, 0xff, 0xff, 0xff];
+
+function createIconCanvas(size) {
+  return { size, data: Buffer.alloc(size * size * 4) };
+}
+
+function circleCoverage(px, py, cx, cy, r) {
+  const dx = px + 0.5 - cx;
+  const dy = py + 0.5 - cy;
+  return Math.max(0, Math.min(1, r - Math.sqrt(dx * dx + dy * dy) + 0.5));
+}
+
+function blendOver(canvas, x, y, b, g, r, a, coverage) {
+  if (coverage <= 0 || x < 0 || y < 0 || x >= canvas.size || y >= canvas.size) return;
+  const sa = (a * coverage) / 255;
+  if (sa <= 0) return;
+  const i = (y * canvas.size + x) * 4;
+  const d = canvas.data;
+  const inv = 1 - sa;
+  d[i] = Math.min(255, Math.round(b * coverage + d[i] * inv));
+  d[i + 1] = Math.min(255, Math.round(g * coverage + d[i + 1] * inv));
+  d[i + 2] = Math.min(255, Math.round(r * coverage + d[i + 2] * inv));
+  d[i + 3] = Math.min(255, Math.round(a * coverage + d[i + 3] * inv));
+}
+
+function fillCircle(canvas, cx, cy, radius, color) {
+  const [b, g, r, a] = color;
+  const x0 = Math.max(0, Math.floor(cx - radius - 1));
+  const x1 = Math.min(canvas.size - 1, Math.ceil(cx + radius + 1));
+  const y0 = Math.max(0, Math.floor(cy - radius - 1));
+  const y1 = Math.min(canvas.size - 1, Math.ceil(cy + radius + 1));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      blendOver(canvas, x, y, b * (a / 255), g * (a / 255), r * (a / 255), a, circleCoverage(x, y, cx, cy, radius));
+    }
+  }
+}
+
+// Center-crop img to a square of `side` px; returns { w, h, bmp } (premultiplied BGRA)
+function squareBitmap(img, side) {
+  try {
+    const { width, height } = img.getSize();
+    const s = Math.min(width, height);
+    if (s <= 0) return null;
+    let sq =
+      width === height
+        ? img
+        : img.crop({ x: Math.floor((width - s) / 2), y: Math.floor((height - s) / 2), width: s, height: s });
+    if (sq.getSize().width !== side) sq = sq.resize({ width: side, height: side, quality: 'best' });
+    const { width: w, height: h } = sq.getSize();
+    const bmp = sq.toBitmap();
+    if (bmp.length !== w * h * 4) return null;
+    return { w, h, bmp };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Draw img (square, size d) centered at (cx, cy); clipped to a circle of radius clipR (or none)
+function drawImage(canvas, img, cx, cy, d, clipR = null) {
+  const side = Math.max(1, Math.round(d));
+  const sq = squareBitmap(img, side);
+  if (!sq) return false;
+  const x0 = Math.round(cx - sq.w / 2);
+  const y0 = Math.round(cy - sq.h / 2);
+  for (let y = 0; y < sq.h; y++) {
+    for (let x = 0; x < sq.w; x++) {
+      const i = (y * sq.w + x) * 4;
+      const a = sq.bmp[i + 3];
+      if (a === 0) continue;
+      const px = x0 + x;
+      const py = y0 + y;
+      const coverage = clipR == null ? 1 : circleCoverage(px, py, cx, cy, clipR);
+      blendOver(canvas, px, py, sq.bmp[i], sq.bmp[i + 1], sq.bmp[i + 2], a, coverage);
+    }
+  }
+  return true;
+}
+
+function drawAvatar(canvas, img, cx, cy, d) {
+  return drawImage(canvas, img, cx, cy, d, d / 2);
+}
+
+function drawGrid(canvas, imgs) {
+  const S = canvas.size;
+  const n = Math.min(imgs.length, 4);
+  if (n === 1) return drawAvatar(canvas, imgs[0], S / 2, S / 2, S);
+  const gap = Math.round(S * 0.03);
+  const d = (S - gap) / 2;
+  const q1 = d / 2;
+  const q2 = S - d / 2;
+  const positions =
+    n === 2
+      ? [[q1, q1], [q2, q2]]
+      : n === 3
+        ? [[q1, q1], [q2, q1], [S / 2, q2]]
+        : [[q1, q1], [q2, q1], [q1, q2], [q2, q2]];
+  let drawn = false;
+  for (let i = 0; i < n; i++) {
+    drawn = drawAvatar(canvas, imgs[i], positions[i][0], positions[i][1], d) || drawn;
+  }
+  return drawn;
+}
+
+function drawBadge(canvas, img) {
+  const S = canvas.size;
+  const d = Math.round(S * 0.46);
+  const ring = Math.max(2, Math.round(S * 0.03));
+  const r = d / 2;
+  const c = S - r - ring;
+  fillCircle(canvas, c, c, r + ring, WHITE);
+  return drawAvatar(canvas, img, c, c, d);
+}
+
+function canvasToImage(canvas) {
+  const img = nativeImage.createFromBitmap(canvas.data, { width: canvas.size, height: canvas.size });
+  return img.isEmpty() ? null : img;
+}
+
+async function composeChatIcon(chat) {
+  if (!chat) return null;
+  const S = CHAT_ICON_SIZE;
+  const [base, badge, ...grid] = await Promise.all([
+    chat.base ? loadNotificationImage(chat.base) : null,
+    chat.badge ? loadNotificationImage(chat.badge) : null,
+    ...(chat.grid || []).map((u) => loadNotificationImage(u))
+  ]);
+  const gridImgs = grid.filter(Boolean);
+  const canvas = createIconCanvas(S);
+  let drawn = false;
+
+  if (chat.kind === 'group' && gridImgs.length > 0) {
+    drawn = drawGrid(canvas, gridImgs);
+  } else if (base && chat.emoji) {
+    fillCircle(canvas, S / 2, S / 2, S / 2, CHAT_EMOJI_BG);
+    drawn = drawImage(canvas, base, S / 2, S / 2, Math.round(S * 0.62));
+  } else if (base) {
+    drawn = drawAvatar(canvas, base, S / 2, S / 2, S);
+  }
+
+  if (!drawn) {
+    // Nothing for the conversation itself: fall back to the sender avatar alone
+    return badge ? makeCircularIcon(badge) : null;
+  }
+  // Sender badge only on spaces: on group chats it would cover a participant of the grid
+  if (badge && chat.kind === 'space') drawBadge(canvas, badge);
+  return canvasToImage(canvas);
+}
+
 async function showCustomNotification({
   title,
   body,
@@ -985,7 +1148,9 @@ async function showCustomNotification({
   appId,
   tabId,
   pageNotificationId = null,
-  sourceWebContents = null
+  sourceWebContents = null,
+  chatIcon = null,
+  fallbackIcon = ''
 }) {
   if (!Notification.isSupported()) return;
 
@@ -994,7 +1159,16 @@ async function showCustomNotification({
 
   // Prefer the icon supplied by the web app (Chat: avatar of the conversation),
   // fall back to the clean official app icon (WITHOUT notification dot).
-  let notifIcon = await resolveNotificationIcon(icon);
+  let notifIcon = null;
+  if (chatIcon) {
+    try {
+      notifIcon = await composeChatIcon(chatIcon);
+    } catch (err) {
+      console.warn('Chat icon composition failed:', err);
+    }
+  }
+  if (!notifIcon) notifIcon = await resolveNotificationIcon(icon);
+  if (!notifIcon && fallbackIcon) notifIcon = await resolveNotificationIcon(fallbackIcon);
   if (!notifIcon) {
     const iconPath = getAppIconPath(appId, false);
     notifIcon = iconPath;
@@ -1341,6 +1515,7 @@ function createTabView(tab) {
 
   // Page (re)loaded: push current visibility so the new document starts in sync
   view.webContents.on('dom-ready', () => {
+    tab.pageLoadedAt = Date.now();
     sendTabVisibility(tab.id, true);
   });
 
@@ -2514,6 +2689,112 @@ function isTrustedIpcSender(event) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Gmail sender photos: harvested by tab-preload from open conversations,
+// persisted so frequent senders get their photo in new-mail notifications.
+// ---------------------------------------------------------------------------
+const GMAIL_AVATARS_FILE = path.join(CONFIG_DIR, 'gmail-avatars.json');
+const MAX_GMAIL_AVATARS = 500;
+let gmailAvatars = null;
+let saveGmailAvatarsTimer = null;
+
+function getGmailAvatars() {
+  if (gmailAvatars) return gmailAvatars;
+  gmailAvatars = new Map();
+  try {
+    if (fs.existsSync(GMAIL_AVATARS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(GMAIL_AVATARS_FILE, 'utf8'));
+      if (data && typeof data === 'object') {
+        Object.keys(data).forEach((email) => {
+          if (typeof data[email] === 'string' && isAllowedNotificationIconUrl(data[email])) {
+            gmailAvatars.set(email, data[email]);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load Gmail avatars:', err);
+  }
+  return gmailAvatars;
+}
+
+function rememberGmailAvatar(email, url) {
+  const map = getGmailAvatars();
+  if (map.get(email) === url) return;
+  map.delete(email);
+  map.set(email, url);
+  while (map.size > MAX_GMAIL_AVATARS) map.delete(map.keys().next().value);
+  clearTimeout(saveGmailAvatarsTimer);
+  saveGmailAvatarsTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+      fs.writeFileSync(GMAIL_AVATARS_FILE, JSON.stringify(Object.fromEntries(map), null, 1), 'utf8');
+    } catch (err) {
+      console.warn('Failed to save Gmail avatars:', err);
+    }
+  }, 2000);
+}
+
+const EMAIL_RE = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}$/;
+
+function sanitizeGmailInfo(gmail) {
+  if (!gmail || typeof gmail !== 'object') return null;
+  const email = typeof gmail.email === 'string' && EMAIL_RE.test(gmail.email) ? gmail.email.toLowerCase() : '';
+  return {
+    threadId: typeof gmail.threadId === 'string' ? gmail.threadId.slice(0, 64) : '',
+    email,
+    name: clampString(gmail.name, 200),
+    subject: clampString(gmail.subject, 300),
+    recap: Boolean(gmail.recap)
+  };
+}
+
+// Our list-based Gmail notifications and Gmail's own (if enabled) can describe the
+// same email: whichever arrives second within the window is dropped.
+const GMAIL_DEDUPE_WINDOW_MS = 20000;
+const recentGmailNotifications = [];
+
+function isDuplicateGmailNotification(tabId, { ours, name, subject, text }) {
+  const now = Date.now();
+  while (recentGmailNotifications.length && now - recentGmailNotifications[0].at > GMAIL_DEDUPE_WINDOW_MS) {
+    recentGmailNotifications.shift();
+  }
+  const lowerText = (text || '').toLowerCase();
+  const matches = (entry) => {
+    if (entry.tabId !== tabId || entry.ours === ours) return false;
+    // Compare the structured side (ours: name/subject) against the free text of the other
+    const n = (ours ? name : entry.name) || '';
+    const sub = (ours ? subject : entry.subject) || '';
+    const hay = ours ? entry.text : lowerText;
+    return (sub.length >= 4 && hay.includes(sub.toLowerCase())) || (n.length >= 3 && hay.includes(n.toLowerCase()));
+  };
+  const duplicate = recentGmailNotifications.some(matches);
+  recentGmailNotifications.push({ at: now, tabId, ours, name, subject, text: lowerText });
+  return duplicate;
+}
+
+ipcMain.on('gmail-avatar', (event, data) => {
+  if (!isTrustedIpcSender(event)) return;
+  const email = data && typeof data.email === 'string' ? data.email.toLowerCase() : '';
+  const url = data && typeof data.url === 'string' ? data.url : '';
+  if (!EMAIL_RE.test(email) || url.length > 2048 || !isAllowedNotificationIconUrl(url)) return;
+  rememberGmailAvatar(email, url);
+});
+
+function sanitizeChatIcon(chat) {
+  if (!chat || typeof chat !== 'object') return null;
+  const kind = ['dm', 'space', 'group', 'unknown'].includes(chat.kind) ? chat.kind : 'unknown';
+  const url = (u) => (typeof u === 'string' && u.length <= 2048 && isAllowedNotificationIconUrl(u) ? u : '');
+  const grid = Array.isArray(chat.grid) ? chat.grid.slice(0, 4).map(url).filter(Boolean) : [];
+  return {
+    kind,
+    base: url(chat.base),
+    badge: url(chat.badge),
+    grid,
+    emoji: Boolean(chat.emoji)
+  };
+}
+
 function clampString(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
 }
@@ -2533,6 +2814,8 @@ ipcMain.on('tab-notification', (event, data) => {
       : clampString(raw.icon, 2048);
   const tag = clampString(raw.tag, 200);
   const silent = Boolean(raw.silent);
+  const chatIcon = sanitizeChatIcon(raw.chat);
+  const gmailInfo = sanitizeGmailInfo(raw.gmail);
   const senderTab = findTabBySender(event.sender);
 
   let appId = senderTab ? senderTab.app : null;
@@ -2559,10 +2842,31 @@ ipcMain.on('tab-notification', (event, data) => {
     targetTab.lastNativeNotificationAt = Date.now();
   }
 
+  // Gmail startup recap of already-unread mail: once per app run per tab
+  // (a reload of the Gmail tab must not repeat it)
+  if (gmailInfo && gmailInfo.recap) {
+    if (!targetTab || targetTab.gmailRecapShown) return;
+    targetTab.gmailRecapShown = true;
+  }
+
   // If user is currently actively viewing this exact tab in the focused foreground window,
   // we don't display a desktop notification toast popup
   const activelyViewed = Boolean(targetTab && isTabActivelyViewed(targetTab.id));
   if (activelyViewed) return;
+
+  // Same email reported both by our inbox reader and by Gmail's own notification
+  if (appId === 'gmail' && targetTab && !(gmailInfo && (gmailInfo.recap || !gmailInfo.threadId))) {
+    const duplicate = isDuplicateGmailNotification(targetTab.id, {
+      ours: Boolean(gmailInfo),
+      name: gmailInfo ? gmailInfo.name : '',
+      subject: gmailInfo ? gmailInfo.subject : '',
+      text: `${title} ${body}`
+    });
+    if (duplicate) return;
+  }
+
+  // Gmail: sender photo remembered from an open conversation, else the letter avatar
+  const cachedAvatar = gmailInfo && gmailInfo.email ? getGmailAvatars().get(gmailInfo.email) : null;
 
   // Unread counts come only from the tab's unread observer (tab-unread-count).
   // Here we only flag the tab, so apps without a counter (e.g. Calendar) still get a dot.
@@ -2575,12 +2879,14 @@ ipcMain.on('tab-notification', (event, data) => {
   showCustomNotification({
     title,
     body,
-    icon,
+    icon: cachedAvatar || icon,
+    fallbackIcon: cachedAvatar ? icon : '',
     tag,
     silent,
     appId,
     tabId: targetTab ? targetTab.id : null,
     pageNotificationId: id || null,
+    chatIcon,
     sourceWebContents: event.sender
   });
 });
@@ -2594,6 +2900,7 @@ ipcMain.on('tab-user-active', () => {
 // Fallback desktop notification when an unread counter increases but the web app
 // did not raise its own notification (e.g. Gmail desktop notifications disabled).
 const FALLBACK_NOTIFICATION_DELAY_MS = 4000;
+const GMAIL_STARTUP_QUIET_MS = 60000;
 const NATIVE_NOTIFICATION_WINDOW_MS = 10000;
 
 function scheduleFallbackNotification(tabId, prevCount) {
@@ -2605,6 +2912,8 @@ function scheduleFallbackNotification(tabId, prevCount) {
     const t = state.tabs.find((x) => x.id === tabId);
     if (!t) return;
     t.fallbackNotificationTimer = null;
+    // Gmail: right after the page loads, the inbox reader sends its own startup recap
+    if (t.app === 'gmail' && t.pageLoadedAt && Date.now() - t.pageLoadedAt < GMAIL_STARTUP_QUIET_MS) return;
     if (t.lastNativeNotificationAt && t.lastNativeNotificationAt > increasedAt - NATIVE_NOTIFICATION_WINDOW_MS) return;
     if (isTabActivelyViewed(tabId)) return;
     const current = t.unreadCount || 0;
