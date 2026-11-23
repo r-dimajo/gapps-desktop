@@ -14,6 +14,26 @@ const APPS = [
   { id: "translate",title: "Translate",description: "Language translation",        url: "https://translate.google.com",host: "translate.google.com",color: "#4285f4" },
 ];
 
+// Service logos are not bundled: they are downloaded at runtime (like a browser does
+// with favicons), cached on disk and refreshed from the live page favicon.
+// First URL that returns a decodable PNG wins.
+const BRANDING = 'https://www.gstatic.com/images/branding/product/2x/';
+const ICON_SOURCES = {
+  gmail: [BRANDING + 'gmail_2020q4_48dp.png'],
+  calendar: [BRANDING + 'calendar_2020q4_48dp.png'],
+  drive: [BRANDING + 'drive_2020q4_48dp.png'],
+  docs: [BRANDING + 'docs_2020q4_48dp.png'],
+  sheets: [BRANDING + 'sheets_2020q4_48dp.png'],
+  slides: [BRANDING + 'slides_2020q4_48dp.png'],
+  forms: [BRANDING + 'forms_2020q4_48dp.png'],
+  meet: [BRANDING + 'meet_2020q4_48dp.png'],
+  chat: [BRANDING + 'chat_2023q4_48dp.png', BRANDING + 'chat_2020q4_48dp.png'],
+  gemini: ['https://www.google.com/s2/favicons?domain=gemini.google.com&sz=128'],
+  keep: [BRANDING + 'keep_2020q4_48dp.png'],
+  tasks: [],
+  translate: ['https://www.google.com/s2/favicons?domain=translate.google.com&sz=64']
+};
+
 function byId(id) {
   return APPS.find((a) => a.id === id);
 }
@@ -154,6 +174,7 @@ function isSafeExternalUrl(url) {
 
 module.exports = {
   APPS,
+  ICON_SOURCES,
   byId,
   byHost,
   detectApp,

@@ -18,7 +18,6 @@ const {
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const crypto = require('crypto');
 const https = require('https');
 const {
   APPS,
@@ -28,7 +27,8 @@ const {
   isInternal,
   isTrustedOrigin,
   isSafeExternalUrl,
-  unwrapGoogleUrl
+  unwrapGoogleUrl,
+  ICON_SOURCES
 } = require('./apps');
 
 // Hand a URL to the OS only for safe schemes (http/https/mailto/tel).
@@ -208,7 +208,6 @@ if (process.platform === 'linux') {
   }
 }
 const ICON_PATH = path.join(__dirname, 'icons', 'icon.png');
-const ICONS_DIR = path.join(__dirname, 'icons', 'apps');
 const NEW_TAB_URL = 'file://' + path.join(__dirname, 'newtab', 'index.html');
 
 let mainWindow = null;
@@ -287,111 +286,13 @@ function setDesktopTheme(theme) {
 // Map of tabId -> WebContentsView
 const tabViews = new Map();
 
-// Generate distinct, crisp 128x128 PNG icons for all Google apps from SVG vectors
-async function ensureAppIcons() {
-  if (app.isPackaged) return;
-  try {
-    fs.mkdirSync(ICONS_DIR, { recursive: true });
-    const { ICONS } = require('./svg-icons');
-
-    const metaPath = path.join(ICONS_DIR, '.meta.json');
-    let meta = {};
-    try {
-      if (fs.existsSync(metaPath)) {
-        meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      }
-    } catch (_) {}
-
-    const newMeta = { ...meta };
-    const keysToGenerate = [];
-
-    for (const [key, svg] of Object.entries(ICONS)) {
-      if (['audio', 'muted', 'pin', 'newtab', 'lock', 'layoutVertical', 'layoutHorizontal'].includes(key)) continue;
-      const pngPath = path.join(ICONS_DIR, `${key}.png`);
-      const hash = crypto.createHash('md5').update(svg).digest('hex');
-      if (!fs.existsSync(pngPath) || fs.statSync(pngPath).size <= 200 || meta[key] !== hash) {
-        keysToGenerate.push({ key, hash });
-      }
-    }
-
-    if (keysToGenerate.length === 0) return;
-
-    // Use an offscreen BrowserWindow to render real SVG vectors into 128x128 PNGs
-    const offscreenWin = new BrowserWindow({
-      show: false,
-      width: 128,
-      height: 128,
-      frame: false,
-      transparent: true,
-      webPreferences: {
-        offscreen: true,
-        contextIsolation: true
-      }
-    });
-
-    for (const { key, hash } of keysToGenerate) {
-      const svg = ICONS[key];
-      if (!svg) continue;
-      const pngPath = path.join(ICONS_DIR, `${key}.png`);
-
-      const cleanSvg = svg
-        .replace(/width="[^"]*"/, 'width="128"')
-        .replace(/height="[^"]*"/, 'height="128"');
-
-      const html = `<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0;width:128px;height:128px;overflow:hidden;background:transparent;display:flex;align-items:center;justify-content:center;}</style></head><body>${cleanSvg}</body></html>`;
-
-      try {
-        await offscreenWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-        await new Promise((r) => setTimeout(r, 70));
-        const image = await offscreenWin.webContents.capturePage();
-        const pngBuffer = image.toPNG();
-        if (pngBuffer && pngBuffer.length > 200) {
-          fs.writeFileSync(pngPath, pngBuffer);
-          newMeta[key] = hash;
-        }
-      } catch (e) {
-        console.error(`Failed to rasterize SVG for ${key}:`, e);
-      }
-    }
-
-    try {
-      fs.writeFileSync(metaPath, JSON.stringify(newMeta, null, 2));
-    } catch (_) {}
-
-    try { offscreenWin.destroy(); } catch (_) {}
-  } catch (err) {
-    console.error('Failed to generate app PNG icons via offscreen window:', err);
-  }
-}
-
-function getAppIconPath(appId, badged = false) {
-  if (badged) {
-    const badgedPath = path.join(ICONS_DIR, `${appId}_badged.png`);
-    if (fs.existsSync(badgedPath) && fs.statSync(badgedPath).size > 200) {
-      return badgedPath;
-    }
-  }
-  const p = path.join(ICONS_DIR, `${appId}.png`);
-  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
-    return p;
-  }
-  return ICON_PATH;
-}
-
+// Tray icons: the app's own logo (Linux integration never shows Google logos)
 function getTrayIconPath() {
-  const p = path.join(ICONS_DIR, 'tray.png');
-  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
-    return p;
-  }
-  return ICON_PATH;
+  return path.join(__dirname, 'icons', 'tray.png');
 }
 
 function getTrayBadgedIconPath() {
-  const p = path.join(ICONS_DIR, 'tray_badged.png');
-  if (fs.existsSync(p) && fs.statSync(p).size > 200) {
-    return p;
-  }
-  return getTrayIconPath();
+  return path.join(__dirname, 'icons', 'tray_badged.png');
 }
 
 function ensureDesktopFile() {
@@ -1077,6 +978,101 @@ async function loadNotificationImage(url) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Service logos (Gmail, Chat, ...) are not bundled: downloaded at runtime from
+// ICON_SOURCES, cached in <userData>/app-icons and refreshed from the live page
+// favicon when it is a large enough PNG. Used by the tab bar, the new-tab page,
+// the tray "apps" menu and as fallback notification icon.
+// ---------------------------------------------------------------------------
+const APP_ICONS_DIR = path.join(CONFIG_DIR, 'app-icons');
+const APP_ICONS_META = path.join(APP_ICONS_DIR, 'meta.json');
+const APP_ICON_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_ICON_MIN_PAGE_SIZE = 48; // smaller page favicons don't replace a better logo
+const appIcons = new Map(); // appId -> NativeImage
+let appIconsMeta = {};
+let appIconsBroadcastTimer = null;
+
+function loadAppIconsFromDisk() {
+  try {
+    appIconsMeta = JSON.parse(fs.readFileSync(APP_ICONS_META, 'utf8')) || {};
+  } catch (_) {
+    appIconsMeta = {};
+  }
+  for (const a of APPS) {
+    const file = path.join(APP_ICONS_DIR, `${a.id}.png`);
+    try {
+      if (!fs.existsSync(file)) continue;
+      const img = nativeImage.createFromPath(file);
+      if (!img.isEmpty()) appIcons.set(a.id, img);
+    } catch (_) {}
+  }
+}
+
+function getAppIconDataUrls() {
+  const out = {};
+  appIcons.forEach((img, appId) => {
+    try {
+      out[appId] = img.toDataURL();
+    } catch (_) {}
+  });
+  return out;
+}
+
+// Push updated logos to the tab bar and to open new-tab pages (debounced)
+function scheduleAppIconsBroadcast() {
+  clearTimeout(appIconsBroadcastTimer);
+  appIconsBroadcastTimer = setTimeout(() => {
+    const icons = getAppIconDataUrls();
+    const targets = [tabbarView];
+    tabViews.forEach((view) => targets.push(view));
+    targets.forEach((view) => {
+      try {
+        if (!view || view.webContents.isDestroyed()) return;
+        if (view !== tabbarView && !view.webContents.getURL().startsWith('file://')) return;
+        view.webContents.send('app-icons', icons);
+      } catch (_) {}
+    });
+    updateTrayMenu();
+  }, 300);
+}
+
+function storeAppIcon(appId, img, source, url) {
+  try {
+    fs.mkdirSync(APP_ICONS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(APP_ICONS_DIR, `${appId}.png`), img.toPNG());
+    appIconsMeta[appId] = { source, url, fetchedAt: Date.now() };
+    fs.writeFileSync(APP_ICONS_META, JSON.stringify(appIconsMeta, null, 1), 'utf8');
+  } catch (err) {
+    console.warn(`Failed to cache icon for ${appId}:`, err);
+  }
+  appIcons.set(appId, img);
+  scheduleAppIconsBroadcast();
+}
+
+async function refreshAppIcons() {
+  for (const a of APPS) {
+    const meta = appIconsMeta[a.id];
+    if (appIcons.has(a.id) && meta && Date.now() - meta.fetchedAt < APP_ICON_MAX_AGE_MS) continue;
+    for (const url of ICON_SOURCES[a.id] || []) {
+      const img = await loadNotificationImage(url);
+      if (img) {
+        storeAppIcon(a.id, img, 'seed', url);
+        break;
+      }
+    }
+  }
+}
+
+// Live favicon of a loaded tab: keeps logos current (and covers apps without a seed URL)
+async function updateAppIconFromPage(appId, faviconUrl) {
+  const meta = appIconsMeta[appId];
+  if (meta && meta.url === faviconUrl && appIcons.has(appId)) return;
+  const img = await loadNotificationImage(faviconUrl); // PNG/JPEG only (.ico is skipped)
+  if (!img) return;
+  if (appIcons.has(appId) && img.getSize().width < APP_ICON_MIN_PAGE_SIZE) return;
+  storeAppIcon(appId, img, 'page', faviconUrl);
+}
+
 async function resolveNotificationIcon(url) {
   const img = await loadNotificationImage(url);
   return img ? makeCircularIcon(img) : null;
@@ -1270,14 +1266,8 @@ async function showCustomNotification({
   if (!notifIcon) notifIcon = await resolveNotificationIcon(icon);
   if (!notifIcon && fallbackIcon) notifIcon = await resolveNotificationIcon(fallbackIcon);
   if (!notifIcon) {
-    const iconPath = getAppIconPath(appId, false);
-    notifIcon = iconPath;
-    try {
-      const img = nativeImage.createFromPath(iconPath);
-      if (!img.isEmpty()) {
-        notifIcon = img;
-      }
-    } catch (_) {}
+    // Service logo fetched at runtime, or the app's own logo
+    notifIcon = appIcons.get(appId) || nativeImage.createFromPath(ICON_PATH);
   }
 
   // Format custom title & branding per app
@@ -1326,7 +1316,9 @@ async function showCustomNotification({
     if (!mainWindow.isVisible()) mainWindow.show();
     mainWindow.focus();
 
-    if (tabId && state.tabs.some((t) => t.id === tabId)) {
+    const clickedTab = tabId ? state.tabs.find((t) => t.id === tabId) : null;
+    if (clickedTab) {
+      clickedTab.lastNotificationClickAt = Date.now();
       activateTab(tabId);
     } else if (appId) {
       showAndSwitchTo(appId);
@@ -1495,6 +1487,31 @@ function checkForAppUpdates(interactive = false) {
   });
 }
 
+// After a notification click, links the page opens for the same app go to the same tab
+const NOTIFICATION_CLICK_REUSE_MS = 5000;
+
+function navigateTabInPlace(tab, view, targetUrl) {
+  try {
+    const current = new URL(view.webContents.getURL());
+    const target = new URL(targetUrl);
+    const sameDocument =
+      current.origin === target.origin &&
+      current.pathname === target.pathname &&
+      current.search === target.search;
+    if (sameDocument) {
+      // Single-page apps (Gmail #inbox/<thread>): change only the hash, no reload
+      view.webContents.executeJavaScript(`location.hash = ${JSON.stringify(target.hash)}`).catch(() => {});
+    } else {
+      view.webContents.loadURL(targetUrl);
+    }
+  } catch (_) {
+    try {
+      view.webContents.loadURL(targetUrl);
+    } catch (_) {}
+  }
+  activateTab(tab.id);
+}
+
 function createTabView(tab) {
   const isLocalNewTab = tab.url.startsWith('file://');
 
@@ -1543,6 +1560,18 @@ function createTabView(tab) {
     }
     const targetUrl = unwrapGoogleUrl(url);
     if (isInternal(targetUrl)) {
+      // A web app reacting to a click on one of its notifications (e.g. Gmail opening
+      // the message with window.open) must reuse its own tab, not spawn a duplicate
+      const detected = detectApp(targetUrl);
+      if (
+        tab.lastNotificationClickAt &&
+        Date.now() - tab.lastNotificationClickAt < NOTIFICATION_CLICK_REUSE_MS &&
+        detected &&
+        detected.id === tab.app
+      ) {
+        navigateTabInPlace(tab, view, targetUrl);
+        return { action: 'deny' };
+      }
       createTab(targetUrl, null, true);
       return { action: 'deny' };
     }
@@ -1611,6 +1640,16 @@ function createTabView(tab) {
       saveState();
       broadcastState();
     }
+  });
+
+  // Keep the service logo current from the page's own favicon
+  view.webContents.on('page-favicon-updated', (_event, favicons) => {
+    const appDef = byId(tab.app);
+    if (!appDef) return;
+    const detected = detectApp(view.webContents.getURL());
+    if (!detected || detected.id !== appDef.id) return;
+    const url = (favicons || []).find((u) => typeof u === 'string' && u.startsWith('https://'));
+    if (url) updateAppIconFromPage(appDef.id, url).catch(() => {});
   });
 
   // Page (re)loaded: push current visibility so the new document starts in sync
@@ -2607,12 +2646,11 @@ function updateTrayMenu() {
 
   // Nested submenu with all 11 apps
   const allAppsSubmenu = APPS.map((app) => {
-    const iconPath = getAppIconPath(app.id);
     let itemIcon = null;
     try {
-      const img = nativeImage.createFromPath(iconPath);
-      if (!img.isEmpty()) {
-        itemIcon = img.resize({ width: 16, height: 16 });
+      const img = appIcons.get(app.id);
+      if (img && !img.isEmpty()) {
+        itemIcon = img.resize({ width: 16, height: 16, quality: 'best' });
       }
     } catch (_) {}
 
@@ -2759,7 +2797,11 @@ ipcMain.handle('get-state', () => {
   };
 });
 
-ipcMain.handle('get-apps', () => APPS);
+ipcMain.handle('get-apps', () => {
+  const icons = getAppIconDataUrls();
+  return APPS.map((a) => ({ ...a, icon: icons[a.id] || null }));
+});
+ipcMain.handle('get-app-icons', () => getAppIconDataUrls());
 ipcMain.handle('open-new-tab', () => openNewTab());
 ipcMain.handle('navigate-current-tab', (_event, { url, appId }) =>
   navigateCurrentTab(url, appId)
@@ -3134,6 +3176,7 @@ app.whenReady().then(async () => {
   ensureDesktopFile();
   loadSettings();
   loadState();
+  loadAppIconsFromDisk();
 
   // Register Global System Hotkey (Ctrl+Alt+G) to toggle Google Suite from anywhere on Linux
   try {
@@ -3318,9 +3361,9 @@ app.whenReady().then(async () => {
     });
   }, 1000);
 
-  // Safely ensure app icons in the background without blocking window launch
+  // Download / refresh the service logos in the background (cached on disk)
   setTimeout(() => {
-    ensureAppIcons().catch((err) => console.warn('Background icon verification:', err));
+    refreshAppIcons().catch((err) => console.warn('App icon refresh failed:', err));
   }, 2000);
 
   updateBounds();

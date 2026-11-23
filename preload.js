@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('gapps', {
   getState: () => ipcRenderer.invoke('get-state'),
   getApps: () => ipcRenderer.invoke('get-apps'),
+  getAppIcons: () => ipcRenderer.invoke('get-app-icons'),
+  onAppIcons: (callback) => {
+    ipcRenderer.on('app-icons', (_e, icons) => callback(icons));
+  },
   activateTab: (id) => ipcRenderer.invoke('activate-tab', id),
   closeTab: (id) => ipcRenderer.invoke('close-tab', id),
   moveTab: (sourceId, targetId, dropAfter) =>

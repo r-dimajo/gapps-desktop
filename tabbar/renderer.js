@@ -2,6 +2,17 @@ const $ = (id) => document.getElementById(id);
 
 let currentState = null;
 let draggedTabId = null;
+// Service logos (data URLs) fetched at runtime by the main process
+let appIcons = {};
+
+window.gapps.getAppIcons().then((icons) => {
+  appIcons = icons || {};
+  if (currentState) render(currentState);
+}).catch(() => {});
+window.gapps.onAppIcons((icons) => {
+  appIcons = icons || {};
+  if (currentState) render(currentState);
+});
 
 function clearDropIndicators() {
   document.querySelectorAll(".tab").forEach((t) => {
@@ -33,8 +44,11 @@ function render(state) {
     stripToggle.innerHTML = ICONS.layoutVertical;
   }
   const brandIconEl = document.querySelector(".brand-icon");
-  if (brandIconEl && typeof ICONS !== "undefined" && ICONS.tray) {
-    brandIconEl.innerHTML = ICONS.tray;
+  if (brandIconEl && !brandIconEl.firstChild) {
+    const logo = document.createElement("img");
+    logo.src = "../icons/app-icon.svg";
+    logo.alt = "";
+    brandIconEl.appendChild(logo);
   }
 
   const splitBtn = $("split-btn");
@@ -130,16 +144,20 @@ function render(state) {
       document.querySelectorAll(".tab").forEach((t) => t.classList.remove("dragging"));
     });
 
-    // App SVG Icon (switches to badged icon with red dot if there are unread notifications)
+    // Service logo (runtime-fetched) with a red dot when there is something unread
     const iconContainer = document.createElement("div");
     iconContainer.className = "tab-icon";
     const hasUnread = Boolean((tab.unreadCount && tab.unreadCount > 0) || tab.hasNotification);
-    const iconKey = hasUnread && typeof ICONS !== "undefined" && ICONS[tab.app + "_badged"]
-      ? tab.app + "_badged"
-      : tab.app;
-    const iconSvg =
-      (typeof ICONS !== "undefined" && (ICONS[iconKey] || ICONS[tab.app] || ICONS.newtab)) || "";
-    iconContainer.innerHTML = iconSvg;
+    if (appIcons[tab.app]) {
+      const img = document.createElement("img");
+      img.src = appIcons[tab.app];
+      img.alt = "";
+      img.draggable = false;
+      iconContainer.appendChild(img);
+    } else {
+      iconContainer.innerHTML = (typeof ICONS !== "undefined" && ICONS.newtab) || "";
+    }
+    iconContainer.classList.toggle("has-dot", hasUnread);
     el.appendChild(iconContainer);
 
     // Title

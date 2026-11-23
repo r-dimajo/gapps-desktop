@@ -47,7 +47,7 @@
         "deb",
         "AppImage"
       ],
-      "icon": "icons/icon.png",
+      "icon": "icons/linux",
       "category": "Network;Office;Chat;",
       "synopsis": "Google Workspace desktop client for Linux",
       "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)",

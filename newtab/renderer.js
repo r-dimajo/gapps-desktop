@@ -12,6 +12,16 @@ async function init() {
 
   setupSearch();
   setupKeyboard();
+
+  // Service logos arrive (or get refreshed) asynchronously from the main process
+  if (window.gapps.onAppIcons) {
+    window.gapps.onAppIcons(async () => {
+      try {
+        appsList = await window.gapps.getApps();
+        renderGrid(appsList);
+      } catch (_) {}
+    });
+  }
 }
 
 function renderGrid(apps) {
@@ -23,7 +33,10 @@ function renderGrid(apps) {
     card.className = "app-card";
     card.title = `${app.title} (Press ${index < 9 ? index + 1 : "0"})`;
 
-    const iconHtml = (typeof ICONS !== "undefined" && ICONS[app.id]) || "";
+    // Service logo fetched at runtime by the main process (not bundled)
+    const iconHtml = app.icon
+      ? `<img src="${app.icon}" alt="" draggable="false">`
+      : (typeof ICONS !== "undefined" && ICONS.newtab) || "";
 
     card.innerHTML = `
       ${index < 9 ? `<span class="shortcut-badge">${index + 1}</span>` : ""}

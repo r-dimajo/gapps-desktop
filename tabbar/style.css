@@ -780,3 +780,37 @@ html.theme-kde, html.theme-kde body {
   --badge-bg: #ed1515;
   font-family: "Noto Sans", sans-serif;
 }
+
+/* Runtime-fetched service logos and the app's own logo */
+.tab .tab-icon {
+  position: relative;
+}
+
+.tab .tab-icon img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+/* Unread dot on the service logo */
+.tab .tab-icon.has-dot::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--badge-bg);
+  box-shadow: 0 0 0 1.5px var(--bg-tab);
+}
+
+.tab.active .tab-icon.has-dot::after {
+  box-shadow: 0 0 0 1.5px var(--bg-active);
+}
+
+.brand-icon img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
