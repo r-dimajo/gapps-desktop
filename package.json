@@ -1,6 +1,6 @@
 {
   "name": "gapps-desktop",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "GApps - unofficial desktop client for Google Workspace on Linux",
   "main": "main.js",
   "author": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
