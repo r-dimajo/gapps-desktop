@@ -1394,6 +1394,25 @@ function isNewerVersion(remoteVer, currentVer) {
   return false;
 }
 
+// https.get that follows redirects (e.g. GitHub answers 301 after a repository rename)
+function httpsGetFollow(url, options, onResponse, redirectsLeft = 3) {
+  const req = https.get(url, options, (res) => {
+    const location = res.headers && res.headers.location;
+    if ([301, 302, 303, 307, 308].includes(res.statusCode) && location && redirectsLeft > 0) {
+      const next = new URL(location, url).toString();
+      if (next.startsWith('https://')) {
+        res.resume();
+        const nextReq = httpsGetFollow(next, options, onResponse, redirectsLeft - 1);
+        nextReq.on('error', (err) => req.emit('error', err));
+        nextReq.on('timeout', () => nextReq.destroy());
+        return;
+      }
+    }
+    onResponse(res);
+  });
+  return req;
+}
+
 function checkForAppUpdates(interactive = false) {
   const currentVersion = app.getVersion();
   const repoOwner = 'r-dimajo';
@@ -1401,7 +1420,7 @@ function checkForAppUpdates(interactive = false) {
   const releasesUrl = `https://github.com/${repoOwner}/${repoName}/releases`;
   const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 
-  const req = https.get(
+  const req = httpsGetFollow(
     apiUrl,
     {
       headers: {
@@ -3207,9 +3226,6 @@ app.whenReady().then(async () => {
   const cleanUa = defaultUa
     .replace(/Electron\/\S+\s?/, '')
     .replace(/gapps-desktop\/\S+\s?/, '')
-    .replace(/google-suite-linux\/\S+\s?/, '')
-    .replace(/google-suite\/\S+\s?/, '')
-    .replace(/GoogleSuite\/\S+\s?/, '')
     .replace(/gapps\/\S+\s?/, '')
     .trim();
   session.defaultSession.setUserAgent(cleanUa, 'en-US,en;q=0.9');

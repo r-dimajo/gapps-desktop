@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-# Compatibility shim: the app was renamed from "Google Suite" to "GApps".
-# Old menu entries / autostart files may still point here.
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gapps" "$@"
