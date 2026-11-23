@@ -1,14 +1,14 @@
 {
-  "name": "google-suite-linux",
+  "name": "gapps-desktop",
   "version": "1.1.4",
-  "description": "Google Suite desktop shell for Linux",
+  "description": "GApps - unofficial desktop client for Google Workspace on Linux",
   "main": "main.js",
   "author": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
   "license": "MIT",
-  "homepage": "https://github.com/r-dimajo/google-suite-linux",
+  "homepage": "https://github.com/r-dimajo/gapps-desktop",
   "repository": {
     "type": "git",
-    "url": "https://github.com/r-dimajo/google-suite-linux.git"
+    "url": "https://github.com/r-dimajo/gapps-desktop.git"
   },
   "scripts": {
     "start": "electron . --no-sandbox",
@@ -23,9 +23,9 @@
     "electron-builder": "^26.18.0"
   },
   "build": {
-    "appId": "com.google.suite.linux",
-    "productName": "google-suite",
-    "executableName": "google-suite",
+    "appId": "io.github.rdimajo.gapps",
+    "productName": "gapps",
+    "executableName": "gapps",
     "artifactName": "${name}_${version}_${arch}.${ext}",
     "directories": {
       "output": "dist"
@@ -49,19 +49,19 @@
       ],
       "icon": "icons/linux",
       "category": "Network;Office;Chat;",
-      "synopsis": "Google Workspace desktop client for Linux",
-      "description": "Integrated desktop client for Google Workspace apps (Gmail, Chat, Calendar, Drive, Docs, Meet, Gemini)",
+      "synopsis": "Unofficial desktop client for Google Workspace",
+      "description": "Unofficial desktop client for Google Workspace. Not affiliated with Google LLC.",
       "desktop": {
         "entry": {
-          "Name": "Google Suite",
-          "Comment": "Google Workspace desktop client for Linux",
-          "Categories": "Network;Office;Chat;",
-          "StartupWMClass": "google-suite"
+          "Name": "GApps",
+          "GenericName": "Google Workspace client",
+          "Comment": "Unofficial desktop client for Google Workspace",
+          "StartupWMClass": "gapps"
         }
       }
     },
     "deb": {
-      "packageName": "google-suite-linux",
+      "packageName": "gapps-desktop",
       "maintainer": "Riccardo Di Majo <riccardo.dimajo@aitronik.com>",
       "priority": "optional",
       "depends": [
@@ -73,12 +73,18 @@
       ],
       "desktop": {
         "entry": {
-          "Name": "Google Suite",
-          "Comment": "Google Workspace desktop client for Linux",
-          "Categories": "Network;Office;Chat;",
-          "StartupWMClass": "google-suite"
+          "Name": "GApps",
+          "GenericName": "Google Workspace client",
+          "Comment": "Unofficial desktop client for Google Workspace",
+          "StartupWMClass": "gapps"
         }
-      }
+      },
+      "fpm": [
+        "--replaces=google-suite-linux",
+        "--conflicts=google-suite-linux",
+        "--provides=google-suite-linux"
+      ]
     }
-  }
+  },
+  "desktopName": "gapps.desktop"
 }

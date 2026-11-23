@@ -3,7 +3,7 @@ set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ICON="$DIR/icons/icon.png"
-LAUNCHER="$DIR/google-suite"
+LAUNCHER="$DIR/gapps"
 
 chmod +x "$LAUNCHER"
 
@@ -13,19 +13,19 @@ ICONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/128x128/apps"
 mkdir -p "$APPS_DIR" "$ICONS_DIR"
 
 # Install application icon into standard hicolor theme
-cp -f "$ICON" "$ICONS_DIR/google-suite.png" 2>/dev/null || true
+cp -f "$ICON" "$ICONS_DIR/gapps.png" 2>/dev/null || true
 
 # Install XDG desktop entry
-cat <<EOF > "$APPS_DIR/google-suite.desktop"
+cat <<EOF > "$APPS_DIR/gapps.desktop"
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Google Suite
-Comment=Google Workspace desktop client for Linux
+Name=GApps
+Comment=Unofficial desktop client for Google Workspace
 Exec=$LAUNCHER
 Icon=$ICON
 Terminal=false
-StartupWMClass=google-suite
+StartupWMClass=gapps
 StartupNotify=true
 Categories=Network;Office;Chat;
 EOF
@@ -34,4 +34,4 @@ EOF
 update-desktop-database "$APPS_DIR" 2>/dev/null || true
 kbuildsycoca6 --noincremental 2>/dev/null || kbuildsycoca5 --noincremental 2>/dev/null || true
 
-echo "Google Suite desktop integration installed successfully for $USER!"
+echo "GApps desktop integration installed successfully for $USER!"

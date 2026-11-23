@@ -35,7 +35,7 @@ const {
 // Prevents pages from launching local files (file://) or arbitrary protocol handlers.
 function safeOpenExternal(url) {
   if (!isSafeExternalUrl(url)) {
-    console.warn('[Google Suite] Blocked openExternal for unsafe URL:', String(url).slice(0, 200));
+    console.warn('[GApps] Blocked openExternal for unsafe URL:', String(url).slice(0, 200));
     return false;
   }
   shell.openExternal(url).catch((err) => console.warn('openExternal failed:', err));
@@ -84,20 +84,24 @@ const allowMultiple =
 if (!allowMultiple) {
   const gotLock = app.requestSingleInstanceLock();
   if (!gotLock) {
-    console.log("\n[Google Suite] Un'altra istanza dell'app e' gia' in esecuzione sul sistema.");
-    console.log("[Google Suite] Il comando e' stato inoltrato alla finestra esistente.");
-    console.log("[Google Suite] Per eseguire un'istanza di test separata (es. dentro Mutter/GNOME):");
-    console.log("               google-suite --new-instance\n");
+    console.log("\n[GApps] Un'altra istanza dell'app e' gia' in esecuzione sul sistema.");
+    console.log("[GApps] Il comando e' stato inoltrato alla finestra esistente.");
+    console.log("[GApps] Per eseguire un'istanza di test separata (es. dentro Mutter/GNOME):");
+    console.log("               gapps --new-instance\n");
     app.quit();
     process.exit(0);
   }
 
-  // Preserve existing Google logins, cookies, tabs, and settings from ~/.config/gapps
+  // Profile (Google logins, cookies, tabs, settings) lives in ~/.config/gapps.
+  // Installs from the "Google Suite" era may have it under an older name: keep using
+  // that one so nobody has to log in again.
   const appData = app.getPath('appData');
-  const legacyDir = path.join(appData, 'gapps');
-  if (fs.existsSync(legacyDir)) {
-    app.setPath('userData', legacyDir);
-  }
+  const profileDir =
+    ['gapps', 'google-suite', 'Google Suite', 'google-suite-linux']
+      .map((name) => path.join(appData, name))
+      .find((dir) => fs.existsSync(path.join(dir, 'state.json')) || fs.existsSync(path.join(dir, 'Cookies'))) ||
+    path.join(appData, 'gapps');
+  app.setPath('userData', profileDir);
 } else {
   const testUserData = path.join(os.tmpdir(), `gapps-session-${process.pid}`);
   app.setPath('userData', testUserData);
@@ -166,7 +170,7 @@ app.on('child-process-gone', (_event, details) => {
   gpuModeReverted = true;
   const fromSettings = gpuModeSource === 'settings';
   if (fromSettings) revertGpuModeToAuto();
-  console.warn(`[Google Suite] GPU process crashed repeatedly in graphics mode "${activeGpuMode}"` +
+  console.warn(`[GApps] GPU process crashed repeatedly in graphics mode "${activeGpuMode}"` +
     (fromSettings ? ', reset to "auto"' : ` (forced by ${gpuModeSource}, remove it to go back to "auto")`));
 
   app.whenReady().then(() => {
@@ -304,23 +308,22 @@ function ensureDesktopFile() {
     const home = process.env.HOME || app.getPath('home');
     const appsDir = path.join(home, '.local', 'share', 'applications');
     const iconsDir = path.join(home, '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
-    const targetIconPathSuite = path.join(iconsDir, 'google-suite.png');
+    const targetIcon = path.join(iconsDir, 'gapps.png');
     const sourceIcon = path.resolve(ICON_PATH);
-    const launcherPath = path.join(__dirname, 'google-suite');
+    const launcherPath = path.join(__dirname, 'gapps');
 
-    // 1. Install hicolor icon for google-suite
+    // 1. Install hicolor icon (overwrites the old Google "G" gapps.png of early installs)
     try {
       if (!fs.existsSync(iconsDir)) {
         fs.mkdirSync(iconsDir, { recursive: true });
       }
-      fs.copyFileSync(sourceIcon, targetIconPathSuite);
+      fs.copyFileSync(sourceIcon, targetIcon);
     } catch (_) {}
 
-    // Remove leftovers of the old "gapps" install: its menu entry and its icon
-    // (the Google "G"), which KDE could still pick for the notification header
+    // Remove the entries of the "Google Suite" era
     for (const legacy of [
-      path.join(appsDir, 'gapps.desktop'),
-      path.join(iconsDir, 'gapps.png')
+      path.join(appsDir, 'google-suite.desktop'),
+      path.join(iconsDir, 'google-suite.png')
     ]) {
       try {
         if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
@@ -335,17 +338,18 @@ function ensureDesktopFile() {
     const desktopContent = `[Desktop Entry]
 Type=Application
 Version=1.0
-Name=Google Suite
-Comment=Google Workspace desktop client for Linux
+Name=GApps
+GenericName=Google Workspace client
+Comment=Unofficial desktop client for Google Workspace
 Exec=${launcherPath}
 Icon=${sourceIcon}
 Terminal=false
-StartupWMClass=google-suite
+StartupWMClass=gapps
 StartupNotify=true
 Categories=Network;Office;Chat;
 `;
 
-    const suiteDesktop = path.join(appsDir, 'google-suite.desktop');
+    const suiteDesktop = path.join(appsDir, 'gapps.desktop');
     fs.writeFileSync(suiteDesktop, desktopContent, 'utf8');
 
     // 3. Notify desktop environment
@@ -363,8 +367,8 @@ function manageAutostart(enable) {
   try {
     const home = process.env.HOME || app.getPath('home');
     const autostartDir = path.join(home, '.config', 'autostart');
-    const autostartFile = path.join(autostartDir, 'google-suite.desktop');
-    const legacyFile = path.join(autostartDir, 'gapps.desktop');
+    const autostartFile = path.join(autostartDir, 'gapps.desktop');
+    const legacyFile = path.join(autostartDir, 'google-suite.desktop');
 
     if (enable) {
       if (!fs.existsSync(autostartDir)) {
@@ -372,19 +376,19 @@ function manageAutostart(enable) {
       }
 
       const execCmd = app.isPackaged
-        ? (process.env.APPIMAGE || 'google-suite')
-        : path.join(__dirname, 'google-suite');
-      const iconCmd = app.isPackaged ? 'google-suite' : path.resolve(ICON_PATH);
+        ? (process.env.APPIMAGE || 'gapps')
+        : path.join(__dirname, 'gapps');
+      const iconCmd = app.isPackaged ? 'gapps' : path.resolve(ICON_PATH);
 
       const desktopContent = `[Desktop Entry]
 Type=Application
 Version=1.0
-Name=Google Suite
-Comment=Google Workspace desktop client for Linux
+Name=GApps
+Comment=Unofficial desktop client for Google Workspace
 Exec=${execCmd}
 Icon=${iconCmd}
 Terminal=false
-StartupWMClass=google-suite
+StartupWMClass=gapps
 StartupNotify=false
 Categories=Network;Office;Chat;
 X-GNOME-Autostart-enabled=true
@@ -563,7 +567,7 @@ function updateAppBadge() {
     app.setBadgeCount(totalUnread);
   }
   if (tray) {
-    tray.setToolTip(totalUnread > 0 ? `Google Suite (${totalUnread} unread)` : 'Google Suite');
+    tray.setToolTip(totalUnread > 0 ? `GApps (${totalUnread} unread)` : 'GApps');
     const trayIconPath = totalUnread > 0 ? getTrayBadgedIconPath() : getTrayIconPath();
     try {
       tray.setImage(nativeImage.createFromPath(trayIconPath));
@@ -1262,7 +1266,7 @@ async function showCustomNotification({
   if (!Notification.isSupported()) return;
 
   const appDef = byId(appId);
-  const appName = appDef ? appDef.title : 'Google Suite';
+  const appName = appDef ? appDef.title : 'GApps';
 
   // Prefer the icon supplied by the web app (Chat: avatar of the conversation),
   // fall back to the clean official app icon (WITHOUT notification dot).
@@ -1393,7 +1397,7 @@ function isNewerVersion(remoteVer, currentVer) {
 function checkForAppUpdates(interactive = false) {
   const currentVersion = app.getVersion();
   const repoOwner = 'r-dimajo';
-  const repoName = 'google-suite-linux';
+  const repoName = 'gapps-desktop';
   const releasesUrl = `https://github.com/${repoOwner}/${repoName}/releases`;
   const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 
@@ -1401,7 +1405,7 @@ function checkForAppUpdates(interactive = false) {
     apiUrl,
     {
       headers: {
-        'User-Agent': `GoogleSuiteLinux/${currentVersion} (Linux; Electron)`
+        'User-Agent': `GApps/${currentVersion} (Linux; Electron)`
       },
       timeout: 6000
     },
@@ -1432,7 +1436,7 @@ function checkForAppUpdates(interactive = false) {
           if (latestTag && isNewerVersion(latestTag, currentVersion)) {
             const displayTag = latestTag.startsWith('v') ? latestTag : `v${latestTag}`;
             const notif = new Notification({
-              title: `Google Suite • Aggiornamento disponibile`,
+              title: `GApps • Aggiornamento disponibile`,
               body: `È disponibile la versione ${displayTag} (versione attuale: v${currentVersion}). Clicca per scaricarla.`,
               icon: nativeImage.createFromPath(ICON_PATH),
               urgency: 'normal'
@@ -1453,7 +1457,7 @@ function checkForAppUpdates(interactive = false) {
                 .showMessageBox(mainWindow, {
                   type: 'info',
                   title: 'Aggiornamento disponibile',
-                  message: `È disponibile una nuova versione di Google Suite: ${displayTag}\n(versione installata: v${currentVersion})`,
+                  message: `È disponibile una nuova versione di GApps: ${displayTag}\n(versione installata: v${currentVersion})`,
                   detail: 'Vuoi aprire la pagina delle release per scaricare il pacchetto aggiornato (.deb / AppImage)?',
                   buttons: ['Apri pagina release', 'Più tardi'],
                   defaultId: 0,
@@ -1469,7 +1473,7 @@ function checkForAppUpdates(interactive = false) {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'Controllo aggiornamenti',
-              message: `Google Suite è aggiornato all'ultima versione (v${currentVersion}).`,
+              message: `GApps è aggiornato all'ultima versione (v${currentVersion}).`,
               buttons: ['OK']
             });
           }
@@ -1646,7 +1650,7 @@ function createTabView(tab) {
 
       if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
         const displayTitle = tab.customTitle || title;
-        mainWindow.setTitle(`${displayTitle} — Google Suite`);
+        mainWindow.setTitle(`${displayTitle} — GApps`);
       }
       saveState();
       broadcastState();
@@ -1672,7 +1676,7 @@ function createTabView(tab) {
   // Renderer crash / OOM kill: without this, Chat/Gmail die silently and stop notifying
   view.webContents.on('render-process-gone', (_event, details) => {
     if (details && details.reason === 'clean-exit') return;
-    console.warn(`[Google Suite] Tab ${tab.app} renderer gone (${details && details.reason}), reloading`);
+    console.warn(`[GApps] Tab ${tab.app} renderer gone (${details && details.reason}), reloading`);
     setTimeout(() => {
       if (tabViews.get(tab.id) === view && !view.webContents.isDestroyed()) {
         try {
@@ -2008,8 +2012,8 @@ function activateTab(tabId) {
     } catch (_) {}
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    const displayTitle = tab.customTitle || tab.title || 'Google Suite';
-    mainWindow.setTitle(`${displayTitle} — Google Suite`);
+    const displayTitle = tab.customTitle || tab.title || 'GApps';
+    mainWindow.setTitle(`${displayTitle} — GApps`);
   }
 
   updateBounds();
@@ -2071,8 +2075,8 @@ function setTabCustomTitle(tabId, customTitle) {
   if (!tab) return;
   tab.customTitle = customTitle && customTitle.trim() ? customTitle.trim() : null;
   if (tab.id === state.active && mainWindow && !mainWindow.isDestroyed()) {
-    const displayTitle = tab.customTitle || tab.title || 'Google Suite';
-    mainWindow.setTitle(`${displayTitle} — Google Suite`);
+    const displayTitle = tab.customTitle || tab.title || 'GApps';
+    mainWindow.setTitle(`${displayTitle} — GApps`);
   }
   saveState();
   broadcastState();
@@ -2436,7 +2440,7 @@ function setGpuMode(mode) {
     .showMessageBox(mainWindow, {
       type: 'info',
       title: 'Graphics compatibility',
-      message: 'Restart Google Suite to apply the new graphics mode.',
+      message: 'Restart GApps to apply the new graphics mode.',
       buttons: ['Restart now', 'Later'],
       defaultId: 0,
       cancelId: 1
@@ -2585,7 +2589,7 @@ function showSettingsMenu() {
     {
       label: 'Test Gmail notification...',
       click: () => {
-        triggerNotificationForApp('gmail', 'Google Suite Team', 'Test notification for Gmail.');
+        triggerNotificationForApp('gmail', 'GApps', 'Test notification for Gmail.');
       }
     },
     {
@@ -2614,7 +2618,7 @@ function showSettingsMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit Google Suite',
+      label: 'Quit GApps',
       click: () => {
         app.isQuitting = true;
         app.quit();
@@ -2674,7 +2678,7 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: isVisible ? 'Hide Google Suite' : 'Show Google Suite',
+      label: isVisible ? 'Hide GApps' : 'Show GApps',
       accelerator: 'CmdOrCtrl+Alt+G',
       click: toggleWindow
     },
@@ -2693,7 +2697,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit Google Suite',
+      label: 'Quit GApps',
       click: () => {
         app.isQuitting = true;
         app.quit();
@@ -2708,7 +2712,7 @@ function createTray() {
   try {
     const icon = nativeImage.createFromPath(getTrayIconPath());
     tray = new Tray(icon);
-    tray.setToolTip('Google Suite');
+    tray.setToolTip('GApps');
 
     updateTrayMenu();
 
@@ -2716,7 +2720,7 @@ function createTray() {
     tray.on('double-click', toggleWindow);
     tray.on('middle-click', toggleWindow);
   } catch (err) {
-    console.warn('[Google Suite] System tray not available in this environment:', err.message);
+    console.warn('[GApps] System tray not available in this environment:', err.message);
   }
 }
 
@@ -3120,7 +3124,7 @@ function scheduleFallbackNotification(tabId, prevCount) {
     const current = t.unreadCount || 0;
     if (current <= prevCount) return;
     const appDef = byId(t.app);
-    const appName = appDef ? appDef.title : 'Google Suite';
+    const appName = appDef ? appDef.title : 'GApps';
     showCustomNotification({
       title: '',
       body: current === 1 ? `1 messaggio non letto in ${appName}` : `${current} messaggi non letti in ${appName}`,
@@ -3179,17 +3183,17 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 app.whenReady().then(async () => {
-  app.setName('Google Suite');
+  app.setName('GApps');
   if (app.setDesktopName) {
-    app.setDesktopName('google-suite.desktop');
+    app.setDesktopName('gapps.desktop');
   }
-  app.setAppUserModelId('com.google.suite.linux');
+  app.setAppUserModelId('io.github.rdimajo.gapps');
   ensureDesktopFile();
   loadSettings();
   loadState();
   loadAppIconsFromDisk();
 
-  // Register Global System Hotkey (Ctrl+Alt+G) to toggle Google Suite from anywhere on Linux
+  // Register Global System Hotkey (Ctrl+Alt+G) to toggle GApps from anywhere on Linux
   try {
     globalShortcut.register('CommandOrControl+Alt+G', () => {
       toggleWindow();
@@ -3202,6 +3206,7 @@ app.whenReady().then(async () => {
   const defaultUa = session.defaultSession.getUserAgent();
   const cleanUa = defaultUa
     .replace(/Electron\/\S+\s?/, '')
+    .replace(/gapps-desktop\/\S+\s?/, '')
     .replace(/google-suite-linux\/\S+\s?/, '')
     .replace(/google-suite\/\S+\s?/, '')
     .replace(/GoogleSuite\/\S+\s?/, '')
@@ -3231,7 +3236,7 @@ app.whenReady().then(async () => {
       (webContents && !webContents.isDestroyed() ? webContents.getURL() : '');
     const allowed = isPermissionAllowed(permission, origin);
     if (!allowed) {
-      console.warn(`[Google Suite] Denied permission "${permission}" for ${String(origin).slice(0, 120)}`);
+      console.warn(`[GApps] Denied permission "${permission}" for ${String(origin).slice(0, 120)}`);
     }
     callback(allowed);
   });
@@ -3243,7 +3248,7 @@ app.whenReady().then(async () => {
       const origin =
         (request && (request.securityOrigin || (request.frame && request.frame.url))) || '';
       if (!isTrustedOrigin(origin)) {
-        console.warn(`[Google Suite] Denied screen capture for ${String(origin).slice(0, 120)}`);
+        console.warn(`[GApps] Denied screen capture for ${String(origin).slice(0, 120)}`);
         callback({});
         return;
       }
@@ -3304,7 +3309,7 @@ app.whenReady().then(async () => {
     height: (targetBounds && targetBounds.height) || defaultHeight,
     minWidth: 700,
     minHeight: 500,
-    title: 'Google Suite',
+    title: 'GApps',
     icon: appWindowIcon,
     autoHideMenuBar: true,
     backgroundColor: '#202124',
@@ -3442,9 +3447,9 @@ app.whenReady().then(async () => {
     mainWindow.focus();
   }
 
-  console.log(`[Google Suite] App ready (Theme: ${getEffectiveTheme().toUpperCase()} | Window visible: ${mainWindow.isVisible()} | GPU mode: ${activeGpuMode} via ${gpuModeSource})`);
+  console.log(`[GApps] App ready (Theme: ${getEffectiveTheme().toUpperCase()} | Window visible: ${mainWindow.isVisible()} | GPU mode: ${activeGpuMode} via ${gpuModeSource})`);
   if (isGnome) {
-    console.log(`[Google Suite] GNOME Note: GNOME Shell does not display tray icons by default.`);
+    console.log(`[GApps] GNOME Note: GNOME Shell does not display tray icons by default.`);
   }
 
   // Handle CLI args

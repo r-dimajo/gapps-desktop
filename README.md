@@ -1,6 +1,13 @@
-# Google Suite for Linux
+<p align="center"><img src="icons/linux/128x128.png" width="96" alt="GApps logo"></p>
 
-A lightweight, multi-tab desktop shell for Google Workspace applications on Linux desktop environments.
+# GApps
+
+**Unofficial** lightweight, multi-tab desktop client for Google Workspace applications on Linux desktop environments.
+
+> GApps is an independent open-source project. It is not affiliated with, endorsed or sponsored by Google LLC.
+> Google, Gmail, Google Chat, Google Calendar, Google Drive, Google Docs, Google Sheets, Google Slides, Google Meet,
+> Gemini, Google Keep, Google Tasks, Google Translate and Google Workspace are trademarks of Google LLC.
+> GApps does not bundle Google logos: service icons are loaded at runtime from Google's own servers, like a browser does.
 
 Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNOME, KDE Plasma, and others).
 
@@ -58,22 +65,22 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 ## Installation
 
 ### Debian / Ubuntu (`.deb`)
-Download the latest `.deb` package from the [Releases](https://github.com/r-dimajo/google-suite-linux/releases) section and install it:
+Download the latest `.deb` package from the [Releases](https://github.com/r-dimajo/gapps-desktop/releases) section and install it:
 ```bash
-sudo dpkg -i google-suite-linux_*.deb
+sudo dpkg -i gapps-desktop_*.deb
 ```
 
 ### Universal Linux (`.AppImage`)
-Download the `.AppImage` from [Releases](https://github.com/r-dimajo/google-suite-linux/releases):
+Download the `.AppImage` from [Releases](https://github.com/r-dimajo/gapps-desktop/releases):
 ```bash
-chmod +x google-suite-linux_*.AppImage
-./google-suite-linux_*.AppImage
+chmod +x gapps-desktop_*.AppImage
+./gapps-desktop_*.AppImage
 ```
 
 ### Running from Source
 ```bash
-git clone https://github.com/r-dimajo/google-suite-linux.git
-cd google-suite-linux
+git clone https://github.com/r-dimajo/gapps-desktop.git
+cd gapps-desktop
 npm install
 npm start
 ```
@@ -83,3 +90,4 @@ npm start
 ## License
 
 This project is released under the MIT License.
+The MIT License covers the source code and the GApps logo (`icons/`). Google trademarks and logos belong to Google LLC and are not part of this project.
