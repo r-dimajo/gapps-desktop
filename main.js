@@ -316,6 +316,17 @@ function ensureDesktopFile() {
       fs.copyFileSync(sourceIcon, targetIconPathSuite);
     } catch (_) {}
 
+    // Remove leftovers of the old "gapps" install: its menu entry and its icon
+    // (the Google "G"), which KDE could still pick for the notification header
+    for (const legacy of [
+      path.join(appsDir, 'gapps.desktop'),
+      path.join(iconsDir, 'gapps.png')
+    ]) {
+      try {
+        if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
+      } catch (_) {}
+    }
+
     // 2. Install .desktop file for development mode
     if (!fs.existsSync(appsDir)) {
       fs.mkdirSync(appsDir, { recursive: true });
