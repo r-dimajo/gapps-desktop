@@ -1524,26 +1524,48 @@ function checkForAppUpdates(interactive = false) {
 // After a notification click, links the page opens for the same app go to the same tab
 const NOTIFICATION_CLICK_REUSE_MS = 5000;
 
-function navigateTabInPlace(tab, view, targetUrl) {
+// Gmail opens a clicked notification in a "popout" window
+// (…/mail/u/N/popout?…&th=#thread-f:<decimal id>). That page is blank without its
+// opener, so translate it to the in-app link of the thread (#inbox/<hex id>).
+function gmailPopoutHash(target) {
+  if (target.hostname !== 'mail.google.com' || !/\/popout\/?$/.test(target.pathname)) return null;
+  const match = (target.searchParams.get('th') || '').match(/thread-[a-z]:(\d+)/);
+  if (!match) return '#inbox';
   try {
-    const current = new URL(view.webContents.getURL());
-    const target = new URL(targetUrl);
-    const sameDocument =
-      current.origin === target.origin &&
-      current.pathname === target.pathname &&
-      current.search === target.search;
-    if (sameDocument) {
-      // Single-page apps (Gmail #inbox/<thread>): change only the hash, no reload
-      view.webContents.executeJavaScript(`location.hash = ${JSON.stringify(target.hash)}`).catch(() => {});
-    } else {
-      view.webContents.loadURL(targetUrl);
-    }
+    return '#inbox/' + BigInt(match[1]).toString(16);
   } catch (_) {
-    try {
-      view.webContents.loadURL(targetUrl);
-    } catch (_) {}
+    return '#inbox';
   }
+}
+
+// Show targetUrl in the tab's current document (hash change, no reload).
+// Returns false when that is not possible: the caller then opens a new tab, so a
+// pinned/locked tab is never replaced by an unrelated page.
+function navigateTabInPlace(tab, view, targetUrl) {
+  let current;
+  let target;
+  try {
+    current = new URL(view.webContents.getURL());
+    target = new URL(targetUrl);
+  } catch (_) {
+    return false;
+  }
+  if (current.origin !== target.origin) return false;
+
+  let hash = null;
+  const popoutHash = gmailPopoutHash(target);
+  if (popoutHash !== null) {
+    // Same Gmail account: /mail/u/0/popout -> /mail/u/0/
+    const accountPath = target.pathname.replace(/popout\/?$/, '');
+    if (current.pathname === accountPath) hash = popoutHash;
+  } else if (current.pathname === target.pathname && current.search === target.search) {
+    hash = target.hash;
+  }
+  if (hash === null) return false;
+
+  view.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`).catch(() => {});
   activateTab(tab.id);
+  return true;
 }
 
 function createTabView(tab) {
@@ -1597,14 +1619,19 @@ function createTabView(tab) {
       // A web app reacting to a click on one of its notifications (e.g. Gmail opening
       // the message with window.open) must reuse its own tab, not spawn a duplicate
       const detected = detectApp(targetUrl);
+      // Gmail "popout" windows are blank without their opener: show the thread here
+      let isGmailPopout = false;
+      try {
+        isGmailPopout = gmailPopoutHash(new URL(targetUrl)) !== null;
+      } catch (_) {}
+      if (isGmailPopout && navigateTabInPlace(tab, view, targetUrl)) return { action: 'deny' };
       if (
         tab.lastNotificationClickAt &&
         Date.now() - tab.lastNotificationClickAt < NOTIFICATION_CLICK_REUSE_MS &&
         detected &&
         detected.id === tab.app
       ) {
-        navigateTabInPlace(tab, view, targetUrl);
-        return { action: 'deny' };
+        if (navigateTabInPlace(tab, view, targetUrl)) return { action: 'deny' };
       }
       createTab(targetUrl, null, true);
       return { action: 'deny' };
