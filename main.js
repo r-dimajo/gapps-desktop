@@ -560,11 +560,40 @@ function broadcastState() {
   }
 }
 
-function updateAppBadge() {
+// Diagnostic log of unread-state changes (no message content): why a tab's red
+// dot / counter or the tray badge changed. <userData>/logs/unread.log, rotated.
+const UNREAD_LOG = path.join(CONFIG_DIR, 'logs', 'unread.log');
+const UNREAD_LOG_MAX_BYTES = 200 * 1024;
+let lastUnreadLogLine = '';
+
+function logUnread(reason, totalUnread) {
+  try {
+    const tabs = state.tabs
+      .filter((t) => (t.unreadCount || 0) > 0 || t.hasNotification)
+      .map((t) => `${t.app}${t.id === state.active ? '*' : ''}:${t.unreadCount || 0}${t.hasNotification ? '+dot' : ''}`)
+      .join(' ');
+    const activeTab = state.tabs.find((t) => t.id === state.active);
+    const win =
+      mainWindow && !mainWindow.isDestroyed()
+        ? `${mainWindow.isVisible() ? 'visible' : 'hidden'}${mainWindow.isMinimized() ? ',min' : ''}${mainWindow.isFocused() ? ',focused' : ''}`
+        : 'none';
+    const summary = `${reason} | total=${totalUnread} tray=${tray ? (totalUnread > 0 ? 'badged' : 'plain') : 'none'} | active=${activeTab ? activeTab.app : '-'} window=${win} | ${tabs || '-'}`;
+    if (summary === lastUnreadLogLine) return;
+    lastUnreadLogLine = summary;
+    fs.mkdirSync(path.dirname(UNREAD_LOG), { recursive: true });
+    try {
+      if (fs.statSync(UNREAD_LOG).size > UNREAD_LOG_MAX_BYTES) fs.renameSync(UNREAD_LOG, `${UNREAD_LOG}.1`);
+    } catch (_) {}
+    fs.appendFileSync(UNREAD_LOG, `${new Date().toISOString()} ${summary}\n`);
+  } catch (_) {}
+}
+
+function updateAppBadge(reason = 'update') {
   const totalUnread = state.tabs.reduce((sum, t) => {
     const unread = Math.max(t.unreadCount || 0, t.hasNotification ? 1 : 0);
     return sum + unread;
   }, 0);
+  logUnread(reason, totalUnread);
   if (app.setBadgeCount) {
     app.setBadgeCount(totalUnread);
   }
@@ -643,7 +672,7 @@ function syncTabVisibility() {
     }
   });
   if (changed) {
-    updateAppBadge();
+    updateAppBadge('tab viewed: dot cleared');
     broadcastState();
   }
 }
@@ -654,7 +683,7 @@ function clearTabNotification(tabId) {
   if (tab.hasNotification || (tab.unreadCount && tab.unreadCount > 0)) {
     tab.hasNotification = false;
     tab.unreadCount = 0;
-    updateAppBadge();
+    updateAppBadge('clearTabNotification');
     broadcastState();
   }
 }
@@ -1309,7 +1338,8 @@ async function showCustomNotification({
     body: body || '',
     icon: notifIcon,
     urgency: 'normal',
-    silent: Boolean(silent)
+    silent: Boolean(silent),
+    actions: [{ type: 'button', text: 'Apri' }]
   });
 
   const key = `${tabId || appId || 'app'}:${tag || pageNotificationId || `${Date.now()}_${Math.random()}`}`;
@@ -1327,7 +1357,7 @@ async function showCustomNotification({
     activeNotifications.delete(activeNotifications.keys().next().value);
   }
 
-  notification.on('click', () => {
+  const openFromNotification = () => {
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.show();
@@ -1348,7 +1378,10 @@ async function showCustomNotification({
         sourceWebContents.send('gapps-notification-event', { id: pageNotificationId, type: 'click' });
       } catch (_) {}
     }
-  });
+  };
+  notification.on('click', openFromNotification);
+  // Explicit "Apri" button: also usable from the KDE notification history
+  notification.on('action', openFromNotification);
 
   try {
     notification.show();
@@ -1365,10 +1398,10 @@ function triggerNotificationForApp(appId, title, body) {
   }
   if (targetTab) {
     targetTab.hasNotification = true;
-    updateAppBadge();
+    updateAppBadge('test notification');
     broadcastState();
   } else {
-    updateAppBadge();
+    updateAppBadge('test notification');
   }
   showCustomNotification({
     title,
@@ -2120,7 +2153,7 @@ function closeTab(tabId) {
   }
 
   state.tabs.splice(index, 1);
-  updateAppBadge();
+  updateAppBadge('tab closed');
 
   // If closed tab was the secondary split view tab, reset split
   if (state.split && state.split.tabId === tabId) {
@@ -2850,6 +2883,8 @@ function createTray() {
     tray.setToolTip('GApps');
 
     updateTrayMenu();
+    // Unread state may already exist (tabs load before the tray is created)
+    updateAppBadge('tray created');
 
     tray.on('click', toggleWindow);
     tray.on('double-click', toggleWindow);
@@ -3214,7 +3249,7 @@ ipcMain.on('tab-notification', (event, data) => {
   // Here we only flag the tab, so apps without a counter (e.g. Calendar) still get a dot.
   if (targetTab && !targetTab.hasNotification) {
     targetTab.hasNotification = true;
-    updateAppBadge();
+    updateAppBadge(`notification from ${appId}`);
     broadcastState();
   }
 
@@ -3286,7 +3321,7 @@ ipcMain.on('tab-unread-count', (event, data) => {
     if (senderTab.unreadCount > 0 || senderTab.hasNotification) {
       senderTab.unreadCount = 0;
       senderTab.hasNotification = false;
-      updateAppBadge();
+      updateAppBadge(`page counter 0 (${senderTab.app})`);
       broadcastState();
     }
     return;
@@ -3295,7 +3330,7 @@ ipcMain.on('tab-unread-count', (event, data) => {
   if (num === prevCount) return;
 
   senderTab.unreadCount = num;
-  updateAppBadge();
+  updateAppBadge(`page counter ${num} (${senderTab.app})`);
   broadcastState();
 
   if (num > prevCount && !isTabActivelyViewed(senderTab.id)) {
