@@ -56,6 +56,7 @@ Built on Electron, tailored specifically for Linux Wayland and X11 sessions (GNO
 | `Ctrl + Shift + Tab` | Switch to previous tab |
 | `Ctrl + 1` ... `Ctrl + 9` | Direct switch to tabs 1 through 9 |
 | `Ctrl + R` | Reload active tab |
+| `Alt + Home` | Go back to the tab's home page (set when pinning, or from the tab menu) |
 | `Alt + Shift + V` | Toggle vertical / horizontal tabs layout |
 | `Alt + Shift + S` | Toggle / configure split view multiplexer |
 | `Ctrl + Alt + G` | Global hotkey to show or hide the application window |

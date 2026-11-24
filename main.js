@@ -510,7 +510,8 @@ function saveStateSync() {
             customTitle: t.customTitle || null,
             url: t.url,
             pinned: Boolean(t.pinned),
-            locked: Boolean(t.locked)
+            locked: Boolean(t.locked),
+            homeUrl: t.homeUrl || null
           })),
           active: state.active,
           split: state.split
@@ -544,6 +545,7 @@ function broadcastState() {
         url: t.url,
         pinned: Boolean(t.pinned),
         locked: Boolean(t.locked),
+        homeUrl: t.homeUrl || null,
         unreadCount: t.unreadCount || 0,
         hasNotification: Boolean(t.hasNotification),
         isAudible: Boolean(t.isAudible),
@@ -1523,6 +1525,8 @@ function checkForAppUpdates(interactive = false) {
 
 // After a notification click, links the page opens for the same app go to the same tab
 const NOTIFICATION_CLICK_REUSE_MS = 5000;
+// window.open URLs whose content was shown in the opener tab: their window is closed at once
+const windowsToDiscard = new Set();
 
 // Gmail opens a clicked notification in a "popout" window
 // (…/mail/u/N/popout?…&th=#thread-f:<decimal id>). That page is blank without its
@@ -1586,6 +1590,11 @@ function createTabView(tab) {
 
   // Global hotkeys inside tab contents
   view.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.alt && !input.control && !input.shift && input.key === 'Home') {
+      event.preventDefault();
+      goTabHome(tab.id);
+      return;
+    }
     if (input.type === 'keyDown' && input.alt && input.shift && input.key.toLowerCase() === 'v') {
       event.preventDefault();
       toggleTabLayout();
@@ -1624,14 +1633,20 @@ function createTabView(tab) {
       try {
         isGmailPopout = gmailPopoutHash(new URL(targetUrl)) !== null;
       } catch (_) {}
-      if (isGmailPopout && navigateTabInPlace(tab, view, targetUrl)) return { action: 'deny' };
-      if (
+      const reuseAfterNotification =
         tab.lastNotificationClickAt &&
         Date.now() - tab.lastNotificationClickAt < NOTIFICATION_CLICK_REUSE_MS &&
         detected &&
-        detected.id === tab.app
-      ) {
-        if (navigateTabInPlace(tab, view, targetUrl)) return { action: 'deny' };
+        detected.id === tab.app;
+      if ((isGmailPopout || reuseAfterNotification) && navigateTabInPlace(tab, view, targetUrl)) {
+        // The content is shown in this tab. Still hand the page a real (hidden) window
+        // and close it right away: a denied window.open makes Gmail show its
+        // "popup blocked" warning before opening the message.
+        windowsToDiscard.add(url);
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: { show: false, width: 1, height: 1, skipTaskbar: true, focusable: false }
+        };
       }
       createTab(targetUrl, null, true);
       return { action: 'deny' };
@@ -1701,6 +1716,18 @@ function createTabView(tab) {
       saveState();
       broadcastState();
     }
+  });
+
+  // Hidden placeholder windows handed to the page (see windowsToDiscard): close them
+  view.webContents.on('did-create-window', (win, details) => {
+    const url = details && details.url;
+    if (!url || !windowsToDiscard.has(url)) return;
+    windowsToDiscard.delete(url);
+    setImmediate(() => {
+      try {
+        if (!win.isDestroyed()) win.destroy();
+      } catch (_) {}
+    });
   });
 
   // Keep the service logo current from the page's own favicon
@@ -2269,11 +2296,57 @@ function toggleLockTab(tabId) {
   broadcastState();
 }
 
+function getTabLiveUrl(tab) {
+  try {
+    const view = tabViews.get(tab.id);
+    const live = view && !view.webContents.isDestroyed() ? view.webContents.getURL() : '';
+    if (live && !live.startsWith('file://') && live !== 'about:blank') return live;
+  } catch (_) {}
+  return tab.url && !tab.url.startsWith('file://') ? tab.url : null;
+}
+
+// Home of a tab: the page set by the user (or when pinning), else the app's start page
+function getTabHomeUrl(tab) {
+  if (tab.homeUrl) return tab.homeUrl;
+  const appDef = byId(tab.app);
+  return appDef ? appDef.url : null;
+}
+
+function setTabHome(tabId, url) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  tab.homeUrl = url || null;
+  saveState();
+  broadcastState();
+}
+
+function goTabHome(tabId = state.active) {
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  const home = getTabHomeUrl(tab);
+  if (!home) return;
+  if (state.active !== tab.id) activateTab(tab.id);
+  const view = tabViews.get(tab.id);
+  if (!view || view.webContents.isDestroyed()) return;
+  try {
+    const current = new URL(view.webContents.getURL());
+    const target = new URL(home);
+    if (current.origin === target.origin && current.pathname === target.pathname && current.search === target.search) {
+      // Same single-page document (Gmail #inbox): change the hash only, no reload
+      view.webContents.executeJavaScript(`location.hash = ${JSON.stringify(target.hash || '#')}`).catch(() => {});
+      return;
+    }
+  } catch (_) {}
+  view.webContents.loadURL(home);
+}
+
 function togglePinTab(tabId) {
   const tab = state.tabs.find((t) => t.id === tabId);
   if (!tab) return;
 
   tab.pinned = !tab.pinned;
+  // Pinning remembers the page as the tab's home (e.g. the inbox, a shared drive root)
+  if (tab.pinned && !tab.homeUrl) tab.homeUrl = getTabLiveUrl(tab);
   const currentIdx = state.tabs.findIndex((t) => t.id === tabId);
   const [moved] = state.tabs.splice(currentIdx, 1);
 
@@ -2359,6 +2432,22 @@ function showTabMenu(tabId) {
       label: 'Rename tab…',
       click: () => promptRenameTab(tabId)
     },
+    { type: 'separator' },
+    {
+      label: 'Go to tab home (Alt+Home)',
+      enabled: Boolean(getTabHomeUrl(tab)),
+      click: () => goTabHome(tabId)
+    },
+    {
+      label: 'Set current page as tab home',
+      click: () => setTabHome(tabId, getTabLiveUrl(tab))
+    },
+    {
+      label: 'Reset tab home',
+      enabled: Boolean(tab.homeUrl),
+      click: () => setTabHome(tabId, null)
+    },
+    { type: 'separator' },
     {
       label: tab.isMuted ? 'Unmute tab audio' : 'Mute tab audio',
       enabled: Boolean(tab.isAudible || tab.isMuted),
@@ -2845,6 +2934,7 @@ ipcMain.handle('get-state', () => {
       url: t.url,
       pinned: Boolean(t.pinned),
       locked: Boolean(t.locked),
+      homeUrl: t.homeUrl || null,
       unreadCount: t.unreadCount || 0,
       hasNotification: Boolean(t.hasNotification),
       isAudible: Boolean(t.isAudible),
@@ -2905,6 +2995,7 @@ ipcMain.handle('move-tab-to-end', (_event, sourceId) => {
   broadcastState();
 });
 
+ipcMain.handle('go-tab-home', (_event, id) => goTabHome(id || state.active));
 ipcMain.handle('reload-active', () => {
   if (state.active && tabViews.has(state.active)) {
     tabViews.get(state.active).webContents.reload();

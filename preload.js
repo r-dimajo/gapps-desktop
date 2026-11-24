@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('gapps', {
   promptRenameTab: (id) => ipcRenderer.invoke('prompt-rename-tab', id),
   toggleMuteTab: (id) => ipcRenderer.invoke('toggle-mute-tab', id),
   reloadActive: () => ipcRenderer.invoke('reload-active'),
+  goTabHome: (id) => ipcRenderer.invoke('go-tab-home', id),
   showAppMenu: () => ipcRenderer.invoke('show-app-menu'),
   showTabMenu: (id) => ipcRenderer.invoke('show-tab-menu', id),
   showSettingsMenu: () => ipcRenderer.invoke('show-settings-menu'),

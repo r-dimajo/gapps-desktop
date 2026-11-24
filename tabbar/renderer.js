@@ -297,6 +297,7 @@ $("new").addEventListener("contextmenu", (e) => {
   window.gapps.showAppMenu();
 });
 $("reload").addEventListener("click", () => window.gapps.reloadActive());
+$("home").addEventListener("click", () => window.gapps.goTabHome());
 $("gear").addEventListener("click", () => window.gapps.showSettingsMenu());
 
 const splitBtnAction = $("split-btn");
@@ -342,6 +343,9 @@ window.addEventListener("keydown", (e) => {
         window.gapps.closeTab(currentState.active);
       }
     }
+  } else if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key === "Home") {
+    e.preventDefault();
+    window.gapps.goTabHome();
   } else if (e.ctrlKey && (e.key === "r" || e.key === "R") || e.key === "F5") {
     e.preventDefault();
     window.gapps.reloadActive();
