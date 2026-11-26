@@ -3318,7 +3318,11 @@ ipcMain.on('tab-unread-count', (event, data) => {
   const num = Math.min(99999, Math.max(0, typeof count === 'number' ? Math.floor(count) || 0 : parseInt(count, 10) || 0));
 
   if (num === 0) {
-    if (senderTab.unreadCount > 0 || senderTab.hasNotification) {
+    // Only a counter that drops to 0 means "read" (here or on another device).
+    // A counter that was already 0 says nothing about the notification dot: Chat
+    // notifies for messages its sidebar counters don't count, and re-sends 0 every
+    // few seconds, which used to wipe the dot and the tray badge right away.
+    if (prevCount > 0) {
       senderTab.unreadCount = 0;
       senderTab.hasNotification = false;
       updateAppBadge(`page counter 0 (${senderTab.app})`);
